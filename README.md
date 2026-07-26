@@ -4,6 +4,18 @@ Groq API (LLM) yordamida mavzu bo'yicha **PowerPoint prezentatsiya** yoki
 alohida **diagramma** (pie, bar, line, flowchart, org chart, Venn, timeline)
 yaratadigan Telegram bot.
 
+- 🖼 **Slaydlarni rasm sifatida ko'rish** — har bir yaratilgan `.pptx` fayl
+  ostida inline tugma chiqadi. Bosilganda, bot har bir slaydni alohida PNG
+  rasmga aylantirib, albom (media group) sifatida yuboradi — PowerPoint
+  ochmasdan turib slaydlarni tezda ko'rish mumkin.
+
+  **Talab:** bu funksiya ishlashi uchun kompyuteringizda **LibreOffice**
+  o'rnatilgan bo'lishi kerak (bepul):
+  https://www.libreoffice.org/download/download/
+  O'rnatgandan so'ng botni qayta ishga tushiring — standart o'rnatish yo'li
+  avtomatik topiladi. Agar boshqa joyga o'rnatgan bo'lsangiz, `.env` fayliga
+  qo'shing: `SOFFICE_PATH=C:\Program Files\LibreOffice\program\soffice.exe`
+
 ## Yangi imkoniyatlar
 
 - 🔑 **Bir nechta Groq API kalit** — `.env` da `GROQ_API_KEYS=kalit1,kalit2,...`
@@ -79,6 +91,7 @@ groq_pptx_bot/
 ├── groq_client.py      # Groq API bilan ishlash, JSON-mode orqali struktura olish
 ├── pptx_builder.py     # Groq JSON'ini .pptx faylga aylantirish (yuqori daraja)
 ├── diagrams.py          # python-pptx bilan slayd/grafik/diagramma chizish (past daraja)
+├── slide_renderer.py    # .pptx slaydlarini PNG rasmga aylantirish (LibreOffice + PyMuPDF)
 ├── config.py            # .env dan sozlamalarni o'qish
 ├── requirements.txt
 ├── .env.example

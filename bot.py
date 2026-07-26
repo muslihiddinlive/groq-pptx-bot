@@ -13,7 +13,7 @@ Ishga tushirish:
 import logging
 import os
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, InputMediaPhoto
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
@@ -25,6 +25,7 @@ from datetime import datetime
 from config import TELEGRAM_BOT_TOKEN, DB_CHANNEL_ID
 import groq_client
 import pptx_builder
+import slide_renderer
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -85,6 +86,54 @@ async def log_to_db_channel(context: ContextTypes.DEFAULT_TYPE, update: Update,
             )
     except Exception:  # noqa: BLE001 - log yozilmasa ham foydalanuvchi oqimi buzilmasin
         logger.exception("DB kanalga yozishda xatolik (chat_id=%s)", DB_CHANNEL_ID)
+
+
+# --------------------------------------------------------------------------
+# "Slaydlarni rasm sifatida ko'rish" — inline tugma orqali chaqiriladi.
+# Har bir slaydni alohida rasmga aylantirib, albom (media group) sifatida yuboradi.
+# --------------------------------------------------------------------------
+
+def _preview_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🖼 Slaydlarni rasm sifatida ko'rish", callback_data="preview_slides")
+    ]])
+
+
+async def preview_slides_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer("Slaydlar tayyorlanmoqda...")
+
+    filepath = context.user_data.get("last_pptx_path")
+    if not filepath or not os.path.exists(filepath):
+        await context.bot.send_message(
+            update.effective_chat.id,
+            "⚠️ Fayl topilmadi (ehtimol eskirgan). Iltimos, /start orqali qayta yarating.",
+        )
+        return
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_PHOTO)
+
+    try:
+        image_paths = slide_renderer.render_slides_to_images(filepath)
+    except slide_renderer.RenderError as e:
+        await context.bot.send_message(update.effective_chat.id, f"❌ {e}")
+        return
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Slaydlarni rasmga aylantirishda kutilmagan xato")
+        await context.bot.send_message(update.effective_chat.id, f"❌ Kutilmagan xatolik: {e}")
+        return
+
+    # Telegram bitta media-group'da eng ko'p 10 ta rasm qabul qiladi — shu sabab guruhlarga bo'lamiz
+    for i in range(0, len(image_paths), 10):
+        chunk = image_paths[i:i + 10]
+        opened_files = [open(p, "rb") for p in chunk]
+        try:
+            media = [InputMediaPhoto(f, caption=f"Slayd {i + idx + 1}" if idx == 0 and i == 0 else None)
+                     for idx, f in enumerate(opened_files)]
+            await context.bot.send_media_group(chat_id=update.effective_chat.id, media=media)
+        finally:
+            for f in opened_files:
+                f.close()
 
 
 # --------------------------------------------------------------------------
@@ -178,7 +227,9 @@ async def preso_slides_received(update: Update, context: ContextTypes.DEFAULT_TY
                 document=f,
                 filename=os.path.basename(filepath),
                 caption=f"✅ Tayyor! \"{data.get('title')}\" prezentatsiyasi.",
+                reply_markup=_preview_keyboard(),
             )
+        context.user_data["last_pptx_path"] = filepath
 
         await log_to_db_channel(context, update, filepath, "Prezentatsiya", f"{topic} ({num_slides} slayd)")
     except groq_client.GroqGenerationError as e:
@@ -234,7 +285,9 @@ async def diagram_desc_received(update: Update, context: ContextTypes.DEFAULT_TY
                 document=f,
                 filename=os.path.basename(filepath),
                 caption=f"✅ Tayyor! \"{data.get('title')}\" diagrammasi.",
+                reply_markup=_preview_keyboard(),
             )
+        context.user_data["last_pptx_path"] = filepath
 
         await log_to_db_channel(context, update, filepath, "Diagramma", description)
     except groq_client.GroqGenerationError as e:
@@ -285,6 +338,7 @@ def main() -> None:
 
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CallbackQueryHandler(preview_slides_callback, pattern="^preview_slides$"))
 
     logger.info("Bot ishga tushdi...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
