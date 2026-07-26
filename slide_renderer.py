@@ -19,11 +19,29 @@ import shutil
 import subprocess
 import tempfile
 
-import fitz  # PyMuPDF
-
 
 class RenderError(Exception):
     """Slaydlarni rasmga aylantirishda yuz bergan xatolik (masalan LibreOffice topilmadi)."""
+
+
+def _import_fitz():
+    """PyMuPDF'ni faqat shu funksiya chaqirilganda import qiladi (lazy import).
+    Shu tariqa, agar PyMuPDF o'rnatishda muammo bo'lsa (masalan Windows'da DLL
+    xatosi), bu FAQAT 'rasm ko'rish' funksiyasiga ta'sir qiladi — botning asosiy
+    qismi (prezentatsiya/diagramma yaratish) baribir ishlayveradi."""
+    try:
+        import fitz  # PyMuPDF
+        return fitz
+    except ImportError as e:
+        raise RenderError(
+            "PyMuPDF kutubxonasi yuklanmadi (rasm ko'rish funksiyasi uchun kerak).\n"
+            "Buni tuzatish uchun terminalda quyidagini bajaring:\n"
+            "  pip uninstall pymupdf -y\n"
+            "  pip install pymupdf==1.24.14\n"
+            "Agar yordam bermasa, 'Microsoft Visual C++ Redistributable (x64)'ni "
+            "o'rnating: https://aka.ms/vs/17/release/vc_redist.x64.exe\n"
+            f"(texnik tafsilot: {e})"
+        ) from e
 
 
 def _find_soffice() -> str:
@@ -94,6 +112,7 @@ def render_slides_to_images(pptx_path: str, dpi: int = 110) -> list[str]:
 
     # 2) pdf -> png (har bir sahifa)
     image_paths = []
+    fitz = _import_fitz()  # RenderError bo'lsa, aniq xabar bilan shu yerda to'xtaydi
     try:
         doc = fitz.open(pdf_path)
         zoom = dpi / 72  # PDF standart 72 dpi hisoblanadi
