@@ -340,8 +340,34 @@ def main() -> None:
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CallbackQueryHandler(preview_slides_callback, pattern="^preview_slides$"))
 
-    logger.info("Bot ishga tushdi...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    # --------------------------------------------------------------------
+    # Ishga tushirish rejimini avtomatik aniqlash:
+    #  - Render'da RENDER_EXTERNAL_URL muhit o'zgaruvchisi avtomatik mavjud
+    #    bo'ladi -> WEBHOOK rejimida ishga tushiramiz (bepul Web Service
+    #    tashqi HTTP so'rov qabul qilishi kerak).
+    #  - Lokal kompyuterda (Windows va h.k.) bu o'zgaruvchi yo'q -> oddiy
+    #    POLLING rejimida ishga tushamiz (hech narsa o'zgartirish shart emas).
+    # --------------------------------------------------------------------
+    render_url = os.getenv("RENDER_EXTERNAL_URL", "").strip()
+
+    if render_url:
+        port = int(os.getenv("PORT", "10000"))
+        # Tokenni webhook manzilining "maxfiy" qismi sifatida ishlatamiz —
+        # shu tariqa faqat Telegram biladigan manzilga so'rov yuboradi.
+        url_path = TELEGRAM_BOT_TOKEN
+        webhook_url = f"{render_url.rstrip('/')}/{url_path}"
+
+        logger.info("WEBHOOK rejimida ishga tushmoqda: %s (port=%s)", webhook_url, port)
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path=url_path,
+            webhook_url=webhook_url,
+            allowed_updates=Update.ALL_TYPES,
+        )
+    else:
+        logger.info("POLLING rejimida ishga tushmoqda (lokal ishlash)...")
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":

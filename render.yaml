@@ -1,0 +1,24 @@
+# Render.com Blueprint — https://render.com/docs/blueprint-spec
+# Render dashboard'da "New +" -> "Blueprint" tanlab shu repoga ulasangiz,
+# quyidagi sozlamalar avtomatik o'qiladi.
+services:
+  - type: web
+    name: groq-pptx-bot
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    # E'TIBOR: healthCheckPath ATAYLAB qo'yilmagan. Bot faqat maxfiy webhook
+    # yo'lida (token) javob beradi, "/" da emas — agar HTTP health check
+    # o'rnatilsa, Render uni doim "nosog'lom" deb hisoblab qayta ishga
+    # tushiraveradi. Sozlamasiz Render standart TCP tekshiruvni ishlatadi
+    # (portga ulanish mumkinmi) — bu biz uchun yetarli va xavfsiz.
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: GROQ_API_KEYS
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: DB_CHANNEL_ID
+        sync: false

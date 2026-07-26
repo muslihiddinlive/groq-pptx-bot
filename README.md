@@ -16,6 +16,45 @@ yaratadigan Telegram bot.
   avtomatik topiladi. Agar boshqa joyga o'rnatgan bo'lsangiz, `.env` fayliga
   qo'shing: `SOFFICE_PATH=C:\Program Files\LibreOffice\program\soffice.exe`
 
+## Render.com'da bepul deploy qilish (LibreOffice o'rnatish shart emas!)
+
+Bot avtomatik ravishda ikki rejimda ishlashi mumkin:
+- **Lokal kompyuterda** (Windows va h.k.) → oddiy **polling** rejimi (hech narsa sozlash shart emas, hozirgi ishlash tartibi).
+- **Render'da** → avtomatik **webhook** rejimiga o'tadi (`RENDER_EXTERNAL_URL` mavjudligini aniqlab).
+
+Bitta kod — ikkala joyda ham ishlaydi.
+
+### Nega Render?
+
+- **Bepul** ("Free" Web Service reja, $0/oy).
+- `Dockerfile` orqali LibreOffice **serverning o'ziga** avtomatik o'rnatiladi — sizga hech narsa o'rnatish shart emas.
+- ⚠️ Cheklov: bepul reja 15 daqiqa harakatsizlikdan keyin "uxlab qoladi". Birinchi xabar kelganda uni "uyg'otish" 30-60 soniya vaqt olishi mumkin — bu normal holat, keyingi xabarlar tezroq ishlaydi. (Doim uyg'oq turishini xohlasangiz, [cron-job.org](https://cron-job.org) kabi bepul xizmat orqali har 10 daqiqada saytingizga so'rov yuborib turishingiz mumkin.)
+
+### Qadamlar
+
+1. **[render.com](https://render.com)**da ro'yxatdan o'ting (GitHub akkountingiz bilan kirsangiz qulay).
+2. Dashboard'da **"New +"** → **"Blueprint"** ni bosing.
+3. `muslihiddinlive/groq-pptx-bot` repongizni tanlang (yoki ulang). Render repodagi `render.yaml` faylini avtomatik o'qib, barcha sozlamalarni tayyorlaydi.
+4. So'raladigan maxfiy o'zgaruvchilarni (environment variables) kiriting:
+   - `TELEGRAM_BOT_TOKEN` — @BotFather'dan olgan token
+   - `GROQ_API_KEYS` — Groq kalit(lar)ingiz (vergul bilan ajratib, bir nechtasi bo'lsa)
+   - `DB_CHANNEL_ID` — (ixtiyoriy) tarix saqlanadigan kanal ID
+5. **"Apply"** / **"Deploy"** tugmasini bosing. Birinchi deploy ~3-5 daqiqa vaqt oladi (LibreOffice o'rnatilishi sabab).
+6. Deploy tugagach, loglarda `WEBHOOK rejimida ishga tushmoqda: https://...` degan qatorni ko'rasiz — bu bot muvaffaqiyatli ishga tushganini bildiradi.
+7. Telegram'da botingizga `/start` yuboring — javob berishi kerak (agar uxlab qolgan bo'lsa, birinchi javob biroz kechikishi mumkin).
+
+### Qo'lda deploy qilish (Blueprint ishlamasa)
+
+1. **"New +"** → **"Web Service"**.
+2. GitHub repongizni ulang, **Runtime: Docker** tanlang.
+3. **Instance Type: Free**.
+4. Environment bo'limida yuqoridagi 3 ta o'zgaruvchini qo'lda qo'shing.
+5. **Create Web Service**.
+
+### Yangilanishlarni deploy qilish
+
+`main` branch'ga har safar `git push` qilganingizda, Render avtomatik ravishda qayta deploy qiladi (auto-deploy yoqilgan bo'lsa — bu standart sozlama).
+
 ## Yangi imkoniyatlar
 
 - 🔑 **Bir nechta Groq API kalit** — `.env` da `GROQ_API_KEYS=kalit1,kalit2,...`
@@ -94,6 +133,9 @@ groq_pptx_bot/
 ├── slide_renderer.py    # .pptx slaydlarini PNG rasmga aylantirish (LibreOffice + PyMuPDF)
 ├── config.py            # .env dan sozlamalarni o'qish
 ├── requirements.txt
+├── Dockerfile           # Render uchun — LibreOffice shu yerda o'rnatiladi
+├── .dockerignore
+├── render.yaml           # Render Blueprint (bir-klik deploy sozlamasi)
 ├── .env.example
 └── generated_files/     # Yaratilgan .pptx fayllar shu yerga saqlanadi (avtomatik)
 ```
