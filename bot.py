@@ -17,12 +17,12 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKe
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ConversationHandler, ContextTypes, filters,
+    ConversationHandler, ContextTypes, filters, ApplicationHandlerStop,
 )
 
 from datetime import datetime
 
-from config import TELEGRAM_BOT_TOKEN, DB_CHANNEL_ID
+from config import TELEGRAM_BOT_TOKEN, DB_CHANNEL_ID, ADMIN_USER_IDS
 import groq_client
 import pptx_builder
 import slide_renderer
@@ -44,6 +44,19 @@ logger = logging.getLogger(__name__)
     DIAGRAM_TYPE,
     DIAGRAM_DESC,
 ) = range(5)
+
+(
+    ADMIN_MENU,
+    ADMIN_WAIT_ADD,
+    ADMIN_WAIT_REMOVE,
+    ADMIN_WAIT_SETLIMIT,
+) = range(5, 9)
+
+# (admin_chat_id, admin_message_id) -> original_user_chat_id
+# Admin forward qilingan xabarga "reply" qilsa, javob shu orqali foydalanuvchiga qaytadi.
+# ESLATMA: xotirada saqlanadi — bot qayta ishga tushsa, eski xabarlarga reply ishlamay
+# qoladi (yangi murojaatlar bilan qayta ishlay boshlaydi). Bu MVP uchun yetarli.
+_relay_map: dict[tuple[int, int], int] = {}
 
 DIAGRAM_LABELS = {
     "pie": "🥧 Doiraviy (Pie)",
@@ -166,6 +179,97 @@ async def _check_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bo
 
 
 # --------------------------------------------------------------------------
+# "Adminga murojaat" — ruxsatsiz foydalanuvchi tugmani bosgach, keyingi
+# xabari (matn/rasm/fayl — istalgani) avtomatik adminlarga forward qilinadi.
+# Admin forward qilingan xabarga "reply" qilsa, javob foydalanuvchiga qaytadi.
+# --------------------------------------------------------------------------
+
+async def contact_admin_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    if not ADMIN_USER_IDS:
+        await query.edit_message_text("⚠️ Hozircha admin sozlanmagan. Keyinroq urinib ko'ring.")
+        return
+
+    context.user_data["awaiting_admin_relay"] = True
+    await query.edit_message_text(
+        "✍️ Xabaringizni yozing — matn, rasm yoki fayl bo'lishi mumkin.\n"
+        "Yuborgan zahotingiz adminga yetkazib beraman."
+    )
+
+
+async def relay_to_admin_or_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Whitelist'da bo'lmagan va aktiv conversation'da bo'lmagan foydalanuvchilardan
+    kelgan har qanday xabarni ushlaydi. Agar 'adminga murojaat' rejimida bo'lsa —
+    forward qiladi, aks holda /start bosishni so'raydi."""
+    user = update.effective_user
+    msg = update.message
+
+    if not context.user_data.get("awaiting_admin_relay"):
+        await msg.reply_text("Botdan foydalanish uchun /start buyrug'ini yuboring.")
+        return
+
+    context.user_data["awaiting_admin_relay"] = False
+
+    header = (
+        f"📩 <b>Yangi murojaat</b>\n"
+        f"👤 {user.full_name} (@{user.username or '—'})\n"
+        f"🆔 <code>{user.id}</code>\n\n"
+        f"↩️ Javob berish uchun shu xabarga (pastdagi forward qilingan xabarga) "
+        f"<b>reply</b> qiling — javobingiz avtomatik foydalanuvchiga yetadi."
+    )
+
+    sent_to_any = False
+    for admin_id in ADMIN_USER_IDS:
+        try:
+            await context.bot.send_message(admin_id, header, parse_mode="HTML")
+            forwarded = await context.bot.forward_message(
+                chat_id=admin_id,
+                from_chat_id=update.effective_chat.id,
+                message_id=msg.message_id,
+            )
+            _relay_map[(admin_id, forwarded.message_id)] = update.effective_chat.id
+            sent_to_any = True
+        except Exception:  # noqa: BLE001
+            logger.exception("Adminga (%s) murojaatni forward qilishda xatolik", admin_id)
+
+    if sent_to_any:
+        await msg.reply_text("✅ Xabaringiz adminga yuborildi. Tez orada javob berishadi.")
+    else:
+        await msg.reply_text("❌ Adminga yuborib bo'lmadi. Keyinroq qayta urinib ko'ring.")
+
+
+async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin forward qilingan murojaatga 'reply' qilganda ishga tushadi —
+    javobni asl foydalanuvchiga qaytaradi."""
+    msg = update.message
+    admin_id = update.effective_user.id
+
+    if not msg.reply_to_message:
+        return
+
+    target_chat_id = _relay_map.get((admin_id, msg.reply_to_message.message_id))
+    if target_chat_id is None:
+        return  # bu reply bizning relay tizimimizga aloqador emas
+
+    try:
+        await context.bot.copy_message(
+            chat_id=target_chat_id,
+            from_chat_id=admin_id,
+            message_id=msg.message_id,
+        )
+        await msg.reply_text("✅ Javobingiz foydalanuvchiga yuborildi.")
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Javobni foydalanuvchiga yuborishda xatolik")
+        await msg.reply_text(f"❌ Yuborib bo'lmadi: {e}")
+
+    # Bu reply bizning relay tizimimizga tegishli edi — boshqa handlerlar
+    # (masalan admin panel conversation) shu xabarni qayta ishlamasin.
+    raise ApplicationHandlerStop
+
+
+# --------------------------------------------------------------------------
 # /start va asosiy menyu
 # --------------------------------------------------------------------------
 
@@ -173,11 +277,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.effective_user
 
     if not ac.is_whitelisted(user.id):
+        keyboard = [[InlineKeyboardButton("📩 Adminga murojaat qilish", callback_data="contact_admin")]]
         await update.message.reply_text(
             "🚫 Kechirasiz, botdan foydalanish uchun ruxsatingiz yo'q.\n\n"
-            f"Sizning ID'ingiz: <code>{user.id}</code>\n"
-            "Buni administratorga yuborib, ruxsat so'rang.",
+            f"Sizning ID'ingiz: <code>{user.id}</code>\n\n"
+            "Quyidagi tugma orqali adminga to'g'ridan-to'g'ri xabar (yoki fayl) "
+            "yuborishingiz mumkin:",
             parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard),
         )
         return ConversationHandler.END
 
@@ -380,87 +487,31 @@ def _parse_limit(text: str):
     return int(text)
 
 
-async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if not ac.is_admin(user.id):
-        await update.message.reply_text("🚫 Bu buyruq faqat administratorlar uchun.")
-        return
+# --------------------------------------------------------------------------
+# ADMIN PANEL — faqat config.ADMIN_USER_IDS'dagi foydalanuvchilar uchun.
+# To'liq inline tugmalar orqali boshqariladi (matn buyruq yozish shart emas).
+# --------------------------------------------------------------------------
 
-    await update.message.reply_text(
-        "🛠 <b>Admin panel</b>\n\n"
-        "/adduser <code>user_id limit</code> — foydalanuvchi qo'shish/yangilash\n"
-        "   masalan: <code>/adduser 123456789 5</code> (kuniga 5 marta)\n"
-        "   yoki: <code>/adduser 123456789 infinity</code> (cheksiz)\n\n"
-        "/removeuser <code>user_id</code> — whitelist'dan o'chirish\n\n"
-        "/setlimit <code>user_id limit</code> — limitni o'zgartirish "
-        "(<code>/adduser</code> bilan bir xil)\n\n"
-        "/listusers — whitelist'dagi barcha foydalanuvchilar va bugungi "
-        "foydalanishlari\n\n"
-        "ℹ️ Foydalanuvchi ID'ini bilish uchun ular sizga o'z ID'sini yuboradi "
-        "(botdan ruxsatsiz foydalanishga urinishganda bot avtomatik ko'rsatadi).",
-        parse_mode="HTML",
-    )
+def _parse_limit(text: str):
+    """'5' -> 5, 'infinity'/'inf'/'cheksiz' -> None. Noto'g'ri bo'lsa ValueError."""
+    text = text.strip().lower()
+    if text in ("infinity", "inf", "cheksiz", "unlimited", "-1"):
+        return None
+    return int(text)
 
 
-async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not ac.is_admin(update.effective_user.id):
-        await update.message.reply_text("🚫 Bu buyruq faqat administratorlar uchun.")
-        return
-
-    if len(context.args) < 2:
-        await update.message.reply_text(
-            "Foydalanish: /adduser <user_id> <limit>\n"
-            "Masalan: /adduser 123456789 5  yoki  /adduser 123456789 infinity"
-        )
-        return
-
-    try:
-        target_id = int(context.args[0])
-        limit = _parse_limit(context.args[1])
-    except ValueError:
-        await update.message.reply_text("❌ user_id butun son, limit esa son yoki 'infinity' bo'lishi kerak.")
-        return
-
-    ac.add_user(target_id, limit)
-    limit_text = "cheksiz" if limit is None else str(limit)
-    await update.message.reply_text(f"✅ Foydalanuvchi {target_id} qo'shildi/yangilandi. Kunlik limit: {limit_text}.")
+def _admin_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Foydalanuvchi qo'shish", callback_data="admin_add")],
+        [InlineKeyboardButton("✏️ Limitni o'zgartirish", callback_data="admin_setlimit")],
+        [InlineKeyboardButton("➖ Foydalanuvchini o'chirish", callback_data="admin_remove")],
+        [InlineKeyboardButton("📋 Ro'yxatni ko'rish", callback_data="admin_list")],
+    ])
 
 
-async def remove_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not ac.is_admin(update.effective_user.id):
-        await update.message.reply_text("🚫 Bu buyruq faqat administratorlar uchun.")
-        return
-
-    if not context.args:
-        await update.message.reply_text("Foydalanish: /removeuser <user_id>")
-        return
-
-    try:
-        target_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("❌ user_id butun son bo'lishi kerak.")
-        return
-
-    removed = ac.remove_user(target_id)
-    if removed:
-        await update.message.reply_text(f"✅ Foydalanuvchi {target_id} whitelist'dan o'chirildi.")
-    else:
-        await update.message.reply_text(f"⚠️ Foydalanuvchi {target_id} whitelist'da topilmadi.")
-
-
-async def set_limit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # /setlimit — /adduser bilan bir xil ishlaydi (upsert)
-    await add_user_command(update, context)
-
-
-async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not ac.is_admin(update.effective_user.id):
-        await update.message.reply_text("🚫 Bu buyruq faqat administratorlar uchun.")
-        return
-
+def _format_user_list() -> str:
     users = ac.list_users()
     lines = [f"👑 <b>Adminlar:</b> {', '.join(str(a) for a in ac.ADMIN_USER_IDS) or '—'} (cheksiz)\n"]
-
     if not users:
         lines.append("Whitelist bo'sh.")
     else:
@@ -469,8 +520,116 @@ async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             limit_text = "∞" if limit is None else str(limit)
             uname = f"@{username}" if username else ""
             lines.append(f"• <code>{user_id}</code> {uname} — bugun: {used}/{limit_text}")
+    return "\n".join(lines)
 
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not ac.is_admin(update.effective_user.id):
+        await update.message.reply_text("🚫 Bu buyruq faqat administratorlar uchun.")
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        "🛠 <b>Admin panel</b>\n\nKerakli amalni tanlang:",
+        parse_mode="HTML",
+        reply_markup=_admin_menu_keyboard(),
+    )
+    return ADMIN_MENU
+
+
+async def admin_menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    action = query.data
+
+    if action == "admin_add":
+        await query.edit_message_text(
+            "➕ Yangi foydalanuvchi qo'shish.\n\n"
+            "<code>user_id limit</code> ko'rinishida yuboring.\n"
+            "Masalan: <code>123456789 5</code> (kuniga 5 marta)\n"
+            "yoki: <code>123456789 infinity</code> (cheksiz)",
+            parse_mode="HTML",
+        )
+        return ADMIN_WAIT_ADD
+
+    elif action == "admin_setlimit":
+        await query.edit_message_text(
+            "✏️ Limitni o'zgartirish.\n\n"
+            "<code>user_id limit</code> ko'rinishida yuboring.\n"
+            "Masalan: <code>123456789 10</code> yoki <code>123456789 infinity</code>",
+            parse_mode="HTML",
+        )
+        return ADMIN_WAIT_SETLIMIT
+
+    elif action == "admin_remove":
+        await query.edit_message_text(
+            "➖ O'chiriladigan foydalanuvchining <code>user_id</code>'sini yuboring.",
+            parse_mode="HTML",
+        )
+        return ADMIN_WAIT_REMOVE
+
+    elif action == "admin_list":
+        await query.edit_message_text(
+            _format_user_list(),
+            parse_mode="HTML",
+            reply_markup=_admin_menu_keyboard(),
+        )
+        return ADMIN_MENU
+
+    return ADMIN_MENU
+
+
+async def admin_add_or_setlimit_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    parts = update.message.text.strip().split()
+    if len(parts) != 2:
+        await update.message.reply_text(
+            "❌ Format noto'g'ri. Yuboring: <code>user_id limit</code>\n"
+            "Masalan: <code>123456789 5</code>",
+            parse_mode="HTML",
+        )
+        return ADMIN_WAIT_ADD
+
+    try:
+        target_id = int(parts[0])
+        limit = _parse_limit(parts[1])
+    except ValueError:
+        await update.message.reply_text("❌ user_id butun son, limit esa son yoki 'infinity' bo'lishi kerak.")
+        return ADMIN_WAIT_ADD
+
+    ac.add_user(target_id, limit)
+    limit_text = "cheksiz" if limit is None else str(limit)
+    await update.message.reply_text(
+        f"✅ Foydalanuvchi <code>{target_id}</code> qo'shildi/yangilandi. Kunlik limit: {limit_text}.",
+        parse_mode="HTML",
+        reply_markup=_admin_menu_keyboard(),
+    )
+    return ADMIN_MENU
+
+
+async def admin_remove_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    try:
+        target_id = int(update.message.text.strip())
+    except ValueError:
+        await update.message.reply_text("❌ user_id butun son bo'lishi kerak. Qayta yuboring.")
+        return ADMIN_WAIT_REMOVE
+
+    removed = ac.remove_user(target_id)
+    text = (f"✅ Foydalanuvchi <code>{target_id}</code> whitelist'dan o'chirildi." if removed
+            else f"⚠️ Foydalanuvchi <code>{target_id}</code> whitelist'da topilmadi.")
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=_admin_menu_keyboard())
+    return ADMIN_MENU
+
+
+async def admin_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("Admin panel yopildi.")
+    return ConversationHandler.END
+
+
+async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Eski matn-buyruq (/listusers) — hamon ishlayveradi, /admin panel bilan bir xil natija."""
+    if not ac.is_admin(update.effective_user.id):
+        await update.message.reply_text("🚫 Bu buyruq faqat administratorlar uchun.")
+        return
+    await update.message.reply_text(_format_user_list(), parse_mode="HTML")
 
 
 def main() -> None:
@@ -493,14 +652,35 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
+    admin_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("admin", admin_panel)],
+        states={
+            ADMIN_MENU: [CallbackQueryHandler(admin_menu_router, pattern="^admin_")],
+            ADMIN_WAIT_ADD: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_or_setlimit_received)],
+            ADMIN_WAIT_SETLIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_or_setlimit_received)],
+            ADMIN_WAIT_REMOVE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_remove_received)],
+        },
+        fallbacks=[CommandHandler("cancel", admin_cancel)],
+    )
+
+    # Eng yuqori ustuvorlik (group=-1): admin forward qilingan murojaatga
+    # "reply" qilsa, boshqa hech qanday handler aralashmasdan to'g'ridan-to'g'ri
+    # foydalanuvchiga yetkaziladi.
+    if ADMIN_USER_IDS:
+        app.add_handler(
+            MessageHandler(filters.REPLY & filters.User(user_id=list(ADMIN_USER_IDS)), admin_reply_handler),
+            group=-1,
+        )
+
     app.add_handler(conv_handler)
+    app.add_handler(admin_conv_handler)
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CallbackQueryHandler(preview_slides_callback, pattern="^preview_slides$"))
-    app.add_handler(CommandHandler("admin", admin_panel))
-    app.add_handler(CommandHandler("adduser", add_user_command))
-    app.add_handler(CommandHandler("removeuser", remove_user_command))
-    app.add_handler(CommandHandler("setlimit", set_limit_command))
     app.add_handler(CommandHandler("listusers", list_users_command))
+    app.add_handler(CallbackQueryHandler(preview_slides_callback, pattern="^preview_slides$"))
+    app.add_handler(CallbackQueryHandler(contact_admin_button, pattern="^contact_admin$"))
+    # Eng oxirida — yuqoridagi hech biriga to'g'ri kelmagan xabarlar uchun
+    # ("adminga murojaat" rejimidagi matn/rasm/fayllarni ushlab qoladi).
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, relay_to_admin_or_fallback))
 
     # --------------------------------------------------------------------
     # Ishga tushirish rejimini avtomatik aniqlash:

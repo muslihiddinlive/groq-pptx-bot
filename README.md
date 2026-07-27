@@ -65,16 +65,25 @@ Bitta kod — ikkala joyda ham ishlaydi.
   2. `.env` fayliga qo'shing: `ADMIN_USER_IDS=123456789` (bir nechta admin bo'lsa vergul bilan).
   3. Botni ishga tushiring — endi sizga (admin) hech qanday cheklov yo'q.
 
-  **Admin buyruqlari** (faqat `ADMIN_USER_IDS`dagilar uchun ishlaydi):
-  - `/admin` — barcha buyruqlar ro'yxati
-  - `/adduser 123456789 5` — foydalanuvchini kuniga 5 marta limit bilan qo'shadi
-  - `/adduser 123456789 infinity` — cheksiz limit bilan qo'shadi
-  - `/setlimit 123456789 10` — mavjud foydalanuvchi limitini o'zgartiradi
-  - `/removeuser 123456789` — whitelist'dan o'chiradi
-  - `/listusers` — barcha whitelist foydalanuvchilari va bugungi foydalanishlari
+  **Admin panel** — endi to'liq **inline tugmalar** orqali boshqariladi:
+  - `/admin` buyrug'ini yuboring — tugmali menyu chiqadi:
+    - ➕ **Foydalanuvchi qo'shish** — bosgach, `user_id limit` yozib yuborasiz
+      (masalan: `123456789 5` yoki `123456789 infinity`)
+    - ✏️ **Limitni o'zgartirish** — xuddi shunday
+    - ➖ **Foydalanuvchini o'chirish** — faqat `user_id` yuborasiz
+    - 📋 **Ro'yxatni ko'rish** — barcha whitelist va bugungi foydalanishlar
+  - `/listusers` — tezkor matn-buyruq (ro'yxatni to'g'ridan-to'g'ri ko'rsatadi)
 
-  Ruxsati yo'q foydalanuvchi `/start` bosganda, bot unga o'z ID'sini ko'rsatadi —
-  shuni sizga (admin) yuborib, ruxsat so'raydi.
+  Ruxsati yo'q foydalanuvchi `/start` bosganda, bot unga o'z ID'sini va
+  **"📩 Adminga murojaat qilish"** tugmasini ko'rsatadi.
+
+- 📩 **Adminga to'g'ridan-to'g'ri murojaat (ikki tomonlama)** — ruxsati yo'q
+  foydalanuvchi "Adminga murojaat qilish" tugmasini bossa, botga yozgan
+  keyingi xabari (matn, rasm, hujjat — istalgani) avtomatik barcha
+  adminlarga yuboriladi, jo'natuvchining ismi/ID'si bilan birga. Admin esa
+  o'sha xabarga oddiy Telegram **"Reply"** (javob berish) orqali javob
+  yozsa, javob avtomatik ravishda so'ragan foydalanuvchiga yetkaziladi —
+  alohida usernam bilan yozishning hojati yo'q.
 
   ⚠️ **Eslatma:** whitelist SQLite faylida saqlanadi. Render bepul rejasida bu
   fayl har qayta deploy/restart'da tozalanadi (persistent disk yo'q). Doimiy
