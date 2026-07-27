@@ -69,6 +69,27 @@ def _set_run(run, size=18, color=COLOR_TEXT, bold=False, name="Calibri"):
     run.font.name = name
 
 
+def add_footer(slide, page_num: int, total: int, brand: str = ""):
+    """Har bir slaydning pastki qismiga sahifa raqamini (va ixtiyoriy brend
+    matnini) qo'shadi — professional taqdimotlarga xos yakuniy detal."""
+    box = slide.shapes.add_textbox(Inches(0.5), Inches(7.08), Inches(3.5), Inches(0.35))
+    tf = box.text_frame
+    p = tf.paragraphs[0]
+    p.text = brand
+    p.font.size = Pt(10)
+    p.font.color.rgb = RGBColor(0xAA, 0xAA, 0xAA)
+    p.font.name = "Calibri"
+
+    num_box = slide.shapes.add_textbox(Inches(12.4), Inches(7.08), Inches(0.7), Inches(0.35))
+    ntf = num_box.text_frame
+    np = ntf.paragraphs[0]
+    np.alignment = PP_ALIGN.RIGHT
+    np.text = f"{page_num}/{total}"
+    np.font.size = Pt(10)
+    np.font.color.rgb = RGBColor(0xAA, 0xAA, 0xAA)
+    np.font.name = "Calibri"
+
+
 # ---------------------------------------------------------------------------
 # 1) TITLE SLIDE
 # ---------------------------------------------------------------------------
@@ -455,5 +476,172 @@ def add_timeline_slide(prs: Presentation, title: str, events: list[dict]):
 
         label_box = slide.shapes.add_textbox(Emu(cx - int(Inches(1.1))), label_y, Inches(2.2), Inches(1.0))
         _center_text(label_box, ev.get("label", ""), size=13, bold=False, color=COLOR_TEXT)
+
+    return slide
+
+
+# ---------------------------------------------------------------------------
+# 8) SECTION DIVIDER (uzun prezentatsiyalarda bo'limlar orasidagi ajratuvchi)
+# ---------------------------------------------------------------------------
+
+def add_section_slide(prs: Presentation, title: str, subtitle: str = ""):
+    slide = _blank_slide(prs)
+
+    panel = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Emu(0), Emu(0), SLIDE_W, SLIDE_H)
+    panel.fill.solid()
+    panel.fill.fore_color.rgb = COLOR_TITLE
+    panel.line.fill.background()
+    panel.shadow.inherit = False
+
+    accent_bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.9), Inches(3.15), Inches(0.9), Inches(0.12))
+    accent_bar.fill.solid()
+    accent_bar.fill.fore_color.rgb = COLOR_ACCENT2
+    accent_bar.line.fill.background()
+    accent_bar.shadow.inherit = False
+
+    box = slide.shapes.add_textbox(Inches(0.9), Inches(3.4), Inches(11.5), Inches(1.4))
+    tf = box.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    p.text = title
+    p.font.size = Pt(40)
+    p.font.bold = True
+    p.font.color.rgb = COLOR_WHITE
+    p.font.name = "Calibri"
+
+    if subtitle:
+        sbox = slide.shapes.add_textbox(Inches(0.95), Inches(4.4), Inches(10.5), Inches(0.8))
+        stf = sbox.text_frame
+        stf.word_wrap = True
+        sp = stf.paragraphs[0]
+        sp.text = subtitle
+        sp.font.size = Pt(18)
+        sp.font.color.rgb = RGBColor(0xCC, 0xCC, 0xCC)
+        sp.font.name = "Calibri"
+
+    return slide
+
+
+# ---------------------------------------------------------------------------
+# 9) STAT / RAQAM SLIDE (2-4 ta katta ko'rsatkich yonma-yon)
+# ---------------------------------------------------------------------------
+
+def add_stat_slide(prs: Presentation, title: str, stats: list[dict]):
+    slide = _blank_slide(prs)
+    _add_title(slide, title)
+
+    n = max(len(stats), 1)
+    card_w = Inches(2.7)
+    gap = Inches(0.5)
+    total_w = card_w * n + gap * (n - 1)
+    start_x = Emu(int((SLIDE_W - total_w) / 2))
+    y = Inches(2.6)
+    card_h = Inches(2.6)
+
+    for i, stat in enumerate(stats):
+        x = Emu(int(start_x) + i * (int(card_w) + int(gap)))
+        card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, y, card_w, card_h)
+        card.fill.solid()
+        card.fill.fore_color.rgb = COLOR_ACCENT_LIGHT
+        card.line.fill.background()
+        card.shadow.inherit = False
+
+        num_box = slide.shapes.add_textbox(x, Emu(int(y) + int(Inches(0.4))), card_w, Inches(1.2))
+        _center_text(num_box, str(stat.get("number", "")), size=40, bold=True, color=CHART_PALETTE_COLOR(i))
+
+        label_box = slide.shapes.add_textbox(Emu(int(x) + int(Inches(0.15))), Emu(int(y) + int(Inches(1.6))),
+                                              Emu(int(card_w) - int(Inches(0.3))), Inches(0.8))
+        _center_text(label_box, stat.get("label", ""), size=14, bold=False, color=COLOR_TEXT)
+
+    return slide
+
+
+# ---------------------------------------------------------------------------
+# 10) QUOTE / IQTIBOS SLIDE
+# ---------------------------------------------------------------------------
+
+def add_quote_slide(prs: Presentation, quote: str, author: str = ""):
+    slide = _blank_slide(prs)
+
+    mark = slide.shapes.add_textbox(Inches(1.0), Inches(1.3), Inches(1.5), Inches(1.5))
+    mtf = mark.text_frame
+    mp = mtf.paragraphs[0]
+    mp.text = "\u201C"
+    mp.font.size = Pt(90)
+    mp.font.bold = True
+    mp.font.color.rgb = COLOR_ACCENT_LIGHT
+    mp.font.name = "Georgia"
+
+    box = slide.shapes.add_textbox(Inches(1.4), Inches(2.6), Inches(10.5), Inches(2.6))
+    tf = box.text_frame
+    tf.word_wrap = True
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    p = tf.paragraphs[0]
+    p.text = quote
+    p.font.size = Pt(28)
+    p.font.italic = True
+    p.font.color.rgb = COLOR_TITLE
+    p.font.name = "Calibri"
+
+    if author:
+        abox = slide.shapes.add_textbox(Inches(1.4), Inches(5.4), Inches(8.0), Inches(0.6))
+        atf = abox.text_frame
+        ap = atf.paragraphs[0]
+        ap.text = f"— {author}"
+        ap.font.size = Pt(18)
+        ap.font.bold = True
+        ap.font.color.rgb = COLOR_ACCENT
+        ap.font.name = "Calibri"
+
+    return slide
+
+
+# ---------------------------------------------------------------------------
+# 11) COMPARISON / TAQQOSLASH SLIDE (ikkita ustunni bir-biriga solishtirish)
+# ---------------------------------------------------------------------------
+
+def add_comparison_slide(prs: Presentation, title: str,
+                          left_title: str, left_items: list[str],
+                          right_title: str, right_items: list[str]):
+    slide = _blank_slide(prs)
+    _add_title(slide, title)
+
+    col_w = Inches(5.6)
+    col_h = Inches(4.7)
+    y = Inches(1.9)
+    gap = Inches(0.5)
+    left_x = Inches(0.9)
+    right_x = Emu(int(left_x) + int(col_w) + int(gap))
+
+    for x, header, items, color in (
+        (left_x, left_title, left_items, COLOR_ACCENT),
+        (right_x, right_title, right_items, COLOR_ACCENT2),
+    ):
+        card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, y, col_w, col_h)
+        card.fill.solid()
+        card.fill.fore_color.rgb = RGBColor(0xF7, 0xF8, 0xF9)
+        card.line.color.rgb = color
+        card.line.width = Pt(1.5)
+        card.shadow.inherit = False
+
+        header_box = slide.shapes.add_textbox(Emu(int(x) + int(Inches(0.3))), Emu(int(y) + int(Inches(0.25))),
+                                               Emu(int(col_w) - int(Inches(0.6))), Inches(0.6))
+        htf = header_box.text_frame
+        hp = htf.paragraphs[0]
+        hp.text = header
+        hp.font.size = Pt(20)
+        hp.font.bold = True
+        hp.font.color.rgb = color
+
+        items_box = slide.shapes.add_textbox(Emu(int(x) + int(Inches(0.3))), Emu(int(y) + int(Inches(1.0))),
+                                              Emu(int(col_w) - int(Inches(0.6))), Emu(int(col_h) - int(Inches(1.2))))
+        itf = items_box.text_frame
+        itf.word_wrap = True
+        for i, item in enumerate(items):
+            ip = itf.paragraphs[0] if i == 0 else itf.add_paragraph()
+            ip.text = f"✓  {item}"
+            ip.font.size = Pt(16)
+            ip.font.color.rgb = COLOR_TEXT
+            ip.space_after = Pt(14)
 
     return slide

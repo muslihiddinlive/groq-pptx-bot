@@ -49,3 +49,23 @@ if not GROQ_API_KEYS:
     print("OGOHLANTIRISH: GROQ_API_KEY(S) .env faylida topilmadi!")
 if not DB_CHANNEL_ID:
     print("MA'LUMOT: DB_CHANNEL_ID sozlanmagan — tarix hech qayerga saqlanmaydi.")
+
+# --------------------------------------------------------------------------
+# Ruxsat nazorati (whitelist + admin panel)
+# --------------------------------------------------------------------------
+# ADMIN_USER_IDS — bularning Telegram user_id'lari doim botdan CHEKSIZ
+# foydalana oladi va /admin panelga kira oladi. .env fayliga vergul bilan
+# ajratib yozing: ADMIN_USER_IDS=123456789,987654321
+# O'zingizning Telegram ID'ingizni bilish uchun @userinfobot ga yozing.
+_raw_admins = os.getenv("ADMIN_USER_IDS", "").strip()
+ADMIN_USER_IDS = {int(x.strip()) for x in _raw_admins.split(",") if x.strip().lstrip("-").isdigit()}
+
+# Whitelist va foydalanish statistikasi saqlanadigan SQLite fayli.
+# DIQQAT: Render'ning bepul rejasida persistent disk yo'q — bu fayl har
+# qayta deploy/restart'da NOLGA tushadi. Doimiy saqlash kerak bo'lsa,
+# Render'da "Persistent Disk" (pullik) qo'shing yoki tashqi DB ishlating.
+DB_PATH = os.getenv("DB_PATH", "bot_access.db")
+
+if not ADMIN_USER_IDS:
+    print("MA'LUMOT: ADMIN_USER_IDS sozlanmagan — /admin panelga hech kim kira olmaydi "
+          "va whitelist bo'sh bo'lsa, HECH KIM botdan foydalana olmaydi!")

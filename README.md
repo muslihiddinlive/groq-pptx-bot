@@ -55,6 +55,37 @@ Bitta kod — ikkala joyda ham ishlaydi.
 
 `main` branch'ga har safar `git push` qilganingizda, Render avtomatik ravishda qayta deploy qiladi (auto-deploy yoqilgan bo'lsa — bu standart sozlama).
 
+- 🔐 **Whitelist + Admin panel** — botdan faqat ruxsat etilgan foydalanuvchilar
+  foydalana oladi. Har biriga kunlik generatsiya limiti belgilanadi (admin
+  cheksiz). Butunlay bot ichidagi buyruqlar orqali boshqariladi, alohida
+  sayt/panel kerak emas.
+
+  **Sozlash:**
+  1. Telegram'da o'z ID'ingizni bilib oling: [@userinfobot](https://t.me/userinfobot)ga yozing.
+  2. `.env` fayliga qo'shing: `ADMIN_USER_IDS=123456789` (bir nechta admin bo'lsa vergul bilan).
+  3. Botni ishga tushiring — endi sizga (admin) hech qanday cheklov yo'q.
+
+  **Admin buyruqlari** (faqat `ADMIN_USER_IDS`dagilar uchun ishlaydi):
+  - `/admin` — barcha buyruqlar ro'yxati
+  - `/adduser 123456789 5` — foydalanuvchini kuniga 5 marta limit bilan qo'shadi
+  - `/adduser 123456789 infinity` — cheksiz limit bilan qo'shadi
+  - `/setlimit 123456789 10` — mavjud foydalanuvchi limitini o'zgartiradi
+  - `/removeuser 123456789` — whitelist'dan o'chiradi
+  - `/listusers` — barcha whitelist foydalanuvchilari va bugungi foydalanishlari
+
+  Ruxsati yo'q foydalanuvchi `/start` bosganda, bot unga o'z ID'sini ko'rsatadi —
+  shuni sizga (admin) yuborib, ruxsat so'raydi.
+
+  ⚠️ **Eslatma:** whitelist SQLite faylida saqlanadi. Render bepul rejasida bu
+  fayl har qayta deploy/restart'da tozalanadi (persistent disk yo'q). Doimiy
+  saqlash kerak bo'lsa, Render'da pullik "Persistent Disk" qo'shing.
+
+- 🎨 **Sifatli, xilma-xil prezentatsiya dizayni** — endi Groq shunchaki
+  matn+grafikdan iborat emas, balki 10 xil slayd turini aralashtirib,
+  professional taqdimotlarga xos tarkib tuzadi: bo'lim ajratuvchilar,
+  katta raqam/statistika kartalar, iqtibos slaydlari, ikki tomonlama
+  taqqoslash jadvallari va h.k. Har bir slaydda sahifa raqami ham bor.
+
 ## Yangi imkoniyatlar
 
 - 🔑 **Bir nechta Groq API kalit** — `.env` da `GROQ_API_KEYS=kalit1,kalit2,...`
@@ -131,6 +162,7 @@ groq_pptx_bot/
 ├── pptx_builder.py     # Groq JSON'ini .pptx faylga aylantirish (yuqori daraja)
 ├── diagrams.py          # python-pptx bilan slayd/grafik/diagramma chizish (past daraja)
 ├── slide_renderer.py    # .pptx slaydlarini PNG rasmga aylantirish (LibreOffice + PyMuPDF)
+├── access_control.py    # Whitelist + kunlik limit (SQLite)
 ├── config.py            # .env dan sozlamalarni o'qish
 ├── requirements.txt
 ├── Dockerfile           # Render uchun — LibreOffice shu yerda o'rnatiladi

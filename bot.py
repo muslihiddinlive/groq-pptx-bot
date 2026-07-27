@@ -26,6 +26,7 @@ from config import TELEGRAM_BOT_TOKEN, DB_CHANNEL_ID
 import groq_client
 import pptx_builder
 import slide_renderer
+import access_control as ac
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -137,10 +138,49 @@ async def preview_slides_callback(update: Update, context: ContextTypes.DEFAULT_
 
 
 # --------------------------------------------------------------------------
+# Generatsiyadan oldin chaqiriladi — kunlik limitni tekshiradi va oshiradi.
+# --------------------------------------------------------------------------
+
+async def _check_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """True — davom etish mumkin. False — rad etildi (xabar allaqachon yuborilgan)."""
+    user = update.effective_user
+    allowed, used, limit = ac.check_and_increment(user.id)
+
+    if allowed:
+        return True
+
+    chat_id = update.effective_chat.id
+    if limit == 0 and used == 0:
+        await context.bot.send_message(
+            chat_id,
+            "🚫 Ruxsatingiz bekor qilingan yoki mavjud emas. Administrator bilan bog'laning.",
+        )
+    else:
+        await context.bot.send_message(
+            chat_id,
+            f"⏳ Bugungi limitingiz tugadi ({used}/{limit}).\n"
+            "Ertaga (kecha yarmidan keyin) qayta urinib ko'ring, yoki administratordan "
+            "limitni oshirishni so'rang.",
+        )
+    return False
+
+
+# --------------------------------------------------------------------------
 # /start va asosiy menyu
 # --------------------------------------------------------------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.effective_user
+
+    if not ac.is_whitelisted(user.id):
+        await update.message.reply_text(
+            "🚫 Kechirasiz, botdan foydalanish uchun ruxsatingiz yo'q.\n\n"
+            f"Sizning ID'ingiz: <code>{user.id}</code>\n"
+            "Buni administratorga yuborib, ruxsat so'rang.",
+            parse_mode="HTML",
+        )
+        return ConversationHandler.END
+
     keyboard = [
         [InlineKeyboardButton("📊 Prezentatsiya yaratish", callback_data="mode_preso")],
         [InlineKeyboardButton("📈 Diagramma yaratish", callback_data="mode_diagram")],
@@ -211,6 +251,9 @@ async def preso_slides_received(update: Update, context: ContextTypes.DEFAULT_TY
     num_slides = int(query.data.split("_")[1])
     topic = context.user_data.get("topic", "Noma'lum mavzu")
 
+    if not await _check_limit(update, context):
+        return ConversationHandler.END
+
     await query.edit_message_text(
         f"⏳ \"{topic}\" mavzusida {num_slides} slaydli prezentatsiya tayyorlanmoqda...\n"
         f"Bu bir necha soniya vaqt olishi mumkin."
@@ -272,6 +315,9 @@ async def diagram_desc_received(update: Update, context: ContextTypes.DEFAULT_TY
     description = update.message.text.strip()
     hint = context.user_data.get("diagram_hint", "")
 
+    if not await _check_limit(update, context):
+        return ConversationHandler.END
+
     await update.message.reply_text("⏳ Diagramma tayyorlanmoqda...")
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
 
@@ -311,16 +357,127 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
+    text = (
         "/start — botni boshlash\n"
         "/cancel — joriy amalni bekor qilish\n"
         "/help — yordam"
     )
+    if ac.is_admin(update.effective_user.id):
+        text += "\n\n🛠 Siz administratorsiz — /admin buyrug'i orqali whitelist'ni boshqarishingiz mumkin."
+    await update.message.reply_text(text)
+
+
+# --------------------------------------------------------------------------
+# ADMIN PANEL — faqat config.ADMIN_USER_IDS'dagi foydalanuvchilar uchun.
+# Whitelist'ni shu buyruqlar orqali boshqarasiz.
+# --------------------------------------------------------------------------
+
+def _parse_limit(text: str):
+    """'5' -> 5, 'infinity'/'inf'/'cheksiz' -> None. Noto'g'ri bo'lsa ValueError."""
+    text = text.strip().lower()
+    if text in ("infinity", "inf", "cheksiz", "unlimited", "-1"):
+        return None
+    return int(text)
+
+
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if not ac.is_admin(user.id):
+        await update.message.reply_text("🚫 Bu buyruq faqat administratorlar uchun.")
+        return
+
+    await update.message.reply_text(
+        "🛠 <b>Admin panel</b>\n\n"
+        "/adduser <code>user_id limit</code> — foydalanuvchi qo'shish/yangilash\n"
+        "   masalan: <code>/adduser 123456789 5</code> (kuniga 5 marta)\n"
+        "   yoki: <code>/adduser 123456789 infinity</code> (cheksiz)\n\n"
+        "/removeuser <code>user_id</code> — whitelist'dan o'chirish\n\n"
+        "/setlimit <code>user_id limit</code> — limitni o'zgartirish "
+        "(<code>/adduser</code> bilan bir xil)\n\n"
+        "/listusers — whitelist'dagi barcha foydalanuvchilar va bugungi "
+        "foydalanishlari\n\n"
+        "ℹ️ Foydalanuvchi ID'ini bilish uchun ular sizga o'z ID'sini yuboradi "
+        "(botdan ruxsatsiz foydalanishga urinishganda bot avtomatik ko'rsatadi).",
+        parse_mode="HTML",
+    )
+
+
+async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not ac.is_admin(update.effective_user.id):
+        await update.message.reply_text("🚫 Bu buyruq faqat administratorlar uchun.")
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "Foydalanish: /adduser <user_id> <limit>\n"
+            "Masalan: /adduser 123456789 5  yoki  /adduser 123456789 infinity"
+        )
+        return
+
+    try:
+        target_id = int(context.args[0])
+        limit = _parse_limit(context.args[1])
+    except ValueError:
+        await update.message.reply_text("❌ user_id butun son, limit esa son yoki 'infinity' bo'lishi kerak.")
+        return
+
+    ac.add_user(target_id, limit)
+    limit_text = "cheksiz" if limit is None else str(limit)
+    await update.message.reply_text(f"✅ Foydalanuvchi {target_id} qo'shildi/yangilandi. Kunlik limit: {limit_text}.")
+
+
+async def remove_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not ac.is_admin(update.effective_user.id):
+        await update.message.reply_text("🚫 Bu buyruq faqat administratorlar uchun.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Foydalanish: /removeuser <user_id>")
+        return
+
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ user_id butun son bo'lishi kerak.")
+        return
+
+    removed = ac.remove_user(target_id)
+    if removed:
+        await update.message.reply_text(f"✅ Foydalanuvchi {target_id} whitelist'dan o'chirildi.")
+    else:
+        await update.message.reply_text(f"⚠️ Foydalanuvchi {target_id} whitelist'da topilmadi.")
+
+
+async def set_limit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # /setlimit — /adduser bilan bir xil ishlaydi (upsert)
+    await add_user_command(update, context)
+
+
+async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not ac.is_admin(update.effective_user.id):
+        await update.message.reply_text("🚫 Bu buyruq faqat administratorlar uchun.")
+        return
+
+    users = ac.list_users()
+    lines = [f"👑 <b>Adminlar:</b> {', '.join(str(a) for a in ac.ADMIN_USER_IDS) or '—'} (cheksiz)\n"]
+
+    if not users:
+        lines.append("Whitelist bo'sh.")
+    else:
+        lines.append(f"📋 <b>Whitelist ({len(users)} ta):</b>")
+        for user_id, username, limit, added_at, used in users:
+            limit_text = "∞" if limit is None else str(limit)
+            uname = f"@{username}" if username else ""
+            lines.append(f"• <code>{user_id}</code> {uname} — bugun: {used}/{limit_text}")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
 def main() -> None:
     if not TELEGRAM_BOT_TOKEN:
         raise SystemExit("TELEGRAM_BOT_TOKEN topilmadi. .env faylini to'ldiring.")
+
+    ac.init_db()
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
@@ -339,6 +496,11 @@ def main() -> None:
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CallbackQueryHandler(preview_slides_callback, pattern="^preview_slides$"))
+    app.add_handler(CommandHandler("admin", admin_panel))
+    app.add_handler(CommandHandler("adduser", add_user_command))
+    app.add_handler(CommandHandler("removeuser", remove_user_command))
+    app.add_handler(CommandHandler("setlimit", set_limit_command))
+    app.add_handler(CommandHandler("listusers", list_users_command))
 
     # --------------------------------------------------------------------
     # Ishga tushirish rejimini avtomatik aniqlash:

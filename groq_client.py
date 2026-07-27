@@ -60,7 +60,7 @@ def _mask(key: str) -> str:
     return f"{key[:6]}...{key[-4:]}" if len(key) > 12 else "***"
 
 
-def _chat_json(system_prompt: str, user_prompt: str, temperature: float = 0.6) -> dict:
+def _chat_json(system_prompt: str, user_prompt: str, temperature: float = 0.6, max_tokens: int = 4000) -> dict:
     """
     Groq'ga so'rov yuboradi va JSON obyekt qaytarishini kutadi.
     Bir nechta API kalit bo'lsa, ular orasida navbat bilan (round-robin) va
@@ -87,7 +87,7 @@ def _chat_json(system_prompt: str, user_prompt: str, temperature: float = 0.6) -
                 ],
                 temperature=temperature,
                 response_format={"type": "json_object"},
-                max_tokens=4000,
+                max_tokens=max_tokens,
             )
             raw = completion.choices[0].message.content
             return json.loads(raw)
@@ -112,7 +112,10 @@ def _chat_json(system_prompt: str, user_prompt: str, temperature: float = 0.6) -
 # 1) TO'LIQ PREZENTATSIYA KONTENTINI GENERATSIYA QILISH
 # --------------------------------------------------------------------------
 
-PRESENTATION_SYSTEM_PROMPT = """Sen professional prezentatsiya kontent-strategisan.
+PRESENTATION_SYSTEM_PROMPT = """Sen professional prezentatsiya dizayneri va kontent-strategisan
+(McKinsey/Apple darajasidagi taqdimotlar tuzasan — quruq matn emas, balki har xil
+formatlar bilan boyitilgan, ko'zga yoqimli va ishonarli tarkib).
+
 Foydalanuvchi bergan mavzu asosida PowerPoint prezentatsiyasi uchun tarkib tuzasan.
 Javobni FAQAT quyidagi JSON formatida qaytar, boshqa hech qanday matn, izoh yoki
 markdown qo'shma:
@@ -120,39 +123,57 @@ markdown qo'shma:
 {
   "title": "Prezentatsiya sarlavhasi",
   "subtitle": "Qisqa pastki sarlavha",
-  "slides": [
-    {
-      "type": "content",
-      "title": "Slayd sarlavhasi",
-      "bullets": ["Qisqa va aniq fikr 1", "Qisqa va aniq fikr 2", "..."]
-    },
-    {
-      "type": "chart",
-      "title": "Slayd sarlavhasi",
-      "chart_type": "pie" | "bar" | "line" | "donut",
-      "series_name": "Ma'lumot nomi",
-      "categories": ["Toifa1", "Toifa2", "..."],
-      "values": [12, 34, "..."]
-    },
-    {
-      "type": "flowchart",
-      "title": "Slayd sarlavhasi",
-      "steps": ["1-bosqich", "2-bosqich", "3-bosqich"]
-    },
-    {
-      "type": "orgchart",
-      "title": "Slayd sarlavhasi",
-      "root": "Bosh element",
-      "children": ["Element1", "Element2", "Element3"]
-    }
-  ]
+  "slides": [ ... quyidagi turlardan aralashtirib ... ]
 }
 
-Qoidalar:
+Slayd turlari (har biri "type" maydoni bilan aniqlanadi):
+
+1. "content" — oddiy matnli slayd:
+   {"type": "content", "title": "...", "bullets": ["fikr 1", "fikr 2", "..."]}
+
+2. "chart" — grafik (raqamli ma'lumot uchun):
+   {"type": "chart", "title": "...", "chart_type": "pie"|"bar"|"line"|"donut",
+    "series_name": "...", "categories": ["...", "..."], "values": [12, 34, "..."]}
+
+3. "flowchart" — jarayon bosqichlari:
+   {"type": "flowchart", "title": "...", "steps": ["1-bosqich", "2-bosqich", "..."]}
+
+4. "orgchart" — tashkiliy tuzilma/ierarxiya:
+   {"type": "orgchart", "title": "...", "root": "...", "children": ["...", "..."]}
+
+5. "venn" — ikkita tushunchaning kesishishi:
+   {"type": "venn", "title": "...", "set_a": "...", "set_b": "...", "overlap": "..."}
+
+6. "timeline" — vaqt bo'yicha voqealar:
+   {"type": "timeline", "title": "...", "events": [{"date": "...", "label": "..."}]}
+
+7. "section" — bo'lim ajratuvchi (uzun prezentatsiyalarda mavzuni bo'limlarga
+   ajratish uchun, to'liq ekran fon rangli, kontent kam):
+   {"type": "section", "title": "Bo'lim nomi", "subtitle": "qisqa izoh (ixtiyoriy)"}
+
+8. "stat" — 2-4 ta katta raqam/ko'rsatkichni ajratib ko'rsatish uchun:
+   {"type": "stat", "title": "...", "stats": [{"number": "87%", "label": "tavsif"}, "..."]}
+
+9. "quote" — ta'sirli iqtibos/tsitata slaydi:
+   {"type": "quote", "quote": "iqtibos matni", "author": "muallif yoki manba"}
+
+10. "comparison" — ikkita narsani yonma-yon taqqoslash:
+    {"type": "comparison", "title": "...", "left_title": "...", "left_items": ["...", "..."],
+     "right_title": "...", "right_items": ["...", "..."]}
+
+QOIDALAR (juda muhim — sifatli, professional natija uchun):
 - Bullets qisqa bo'lsin (har biri 12 so'zdan oshmasin), gap emas, fikr sifatida.
-- Har bir slaydda 3-5 ta bullet bo'lsin (content turi uchun).
-- Mavzuga mos bo'lsa, kamida 1 ta "chart" yoki "flowchart"/"orgchart" turidagi slayd qo'sh —
-  prezentatsiya faqat matndan iborat bo'lmasin.
+- Har bir "content" slaydda 3-5 ta bullet bo'lsin.
+- **FORMAT XILMA-XILLIGI SHART**: prezentatsiya faqat "content" va "chart"dan iborat
+  bo'lmasin. Kamida 4-5 xil turdagi slaydni aralashtirib ishlat (masalan: content,
+  chart, stat, quote, comparison, flowchart — mavzuga mosini tanlab).
+- Agar prezentatsiya 6+ slayddan iborat bo'lsa, mantiqiy bo'limlarni "section"
+  turi bilan ajrat (masalan: "Muammo" bo'limi, "Yechim" bo'limi, "Natijalar" bo'limi).
+- "stat" turini muhim raqamlar/statistika bo'lsa ishlat (masalan bozor hajmi,
+  o'sish foizi, foydalanuvchilar soni).
+- "quote" turini fikrni kuchaytirish yoki insho uslubida ta'sir qoldirish uchun
+  ishlat (mashhur odam, ekspert yoki umumiy hikmatli gap — muallifni ko'rsat).
+- "comparison" turini ikkita variant/yondashuv/davr solishtirilganda ishlat.
 - Chart uchun raqamlar realistik va mantiqiy bo'lsin.
 - Foydalanuvchi so'ragan tildan boshqa tilda javob berma."""
 
@@ -172,7 +193,7 @@ def generate_presentation(topic: str, num_slides: int, language: str = "o'zbek")
         f"Til: {language}\n"
         f"Shu mavzuda professional, qiziqarli va foydali prezentatsiya tarkibini tuz."
     )
-    data = _chat_json(PRESENTATION_SYSTEM_PROMPT, user_prompt, temperature=0.7)
+    data = _chat_json(PRESENTATION_SYSTEM_PROMPT, user_prompt, temperature=0.7, max_tokens=6000)
 
     if "slides" not in data or "title" not in data:
         raise GroqGenerationError(f"Groq javobi kutilgan sxemaga mos emas: {data}")
