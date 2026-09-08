@@ -3,3 +3,6 @@ groq>=1.6.0
 python-pptx==1.0.2
 python-dotenv==1.0.1
 pymupdf==1.24.14
+
+# Fayl-yordamchi rejimi uchun (DOCX/XLSX/PDF o'qish-yozish)
+ms-file-toolkit>=0.4.0

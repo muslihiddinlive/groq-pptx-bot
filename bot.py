@@ -27,6 +27,7 @@ import groq_client
 import pptx_builder
 import slide_renderer
 import access_control as ac
+import file_assistant
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -43,14 +44,15 @@ logger = logging.getLogger(__name__)
     PRESO_SLIDES,
     DIAGRAM_TYPE,
     DIAGRAM_DESC,
-) = range(5)
+    FILE_ASSISTANT,
+) = range(6)
 
 (
     ADMIN_MENU,
     ADMIN_WAIT_ADD,
     ADMIN_WAIT_REMOVE,
     ADMIN_WAIT_SETLIMIT,
-) = range(5, 9)
+) = range(6, 10)
 
 # (admin_chat_id, admin_message_id) -> original_user_chat_id
 # Admin forward qilingan xabarga "reply" qilsa, javob shu orqali foydalanuvchiga qaytadi.
@@ -291,10 +293,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     keyboard = [
         [InlineKeyboardButton("📊 Prezentatsiya yaratish", callback_data="mode_preso")],
         [InlineKeyboardButton("📈 Diagramma yaratish", callback_data="mode_diagram")],
+        [InlineKeyboardButton("🗂 Fayl bilan ishlash (AI)", callback_data="mode_file")],
     ]
     text = (
         "Salom! 👋 Men Groq AI yordamida PowerPoint (.pptx) prezentatsiya va "
-        "diagrammalar yarataman.\n\n"
+        "diagrammalar yarataman, shuningdek Word/Excel/PDF fayllar bilan ham "
+        "ishlashingizga yordam beraman.\n\n"
         "Nima qilishni xohlaysiz?"
     )
     if update.message:
@@ -327,7 +331,79 @@ async def mode_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
         return DIAGRAM_TYPE
 
+    elif query.data == "mode_file":
+        context.user_data["file_history"] = []
+        await query.edit_message_text(
+            "🗂 <b>Fayl bilan ishlash rejimi</b>\n\n"
+            "Menga Word/Excel/PowerPoint/PDF fayl yuboring (izoh — caption — bilan "
+            "nima qilish kerakligini yozib), yoki shunchaki matn bilan so'rang "
+            "(masalan: <i>\"hisobot.docx yarat, sarlavhasi 'Hisobot' bo'lsin\"</i>).\n\n"
+            "Chiqish uchun /done yozing.",
+            parse_mode="HTML",
+        )
+        return FILE_ASSISTANT
+
     return CHOOSING_MODE
+
+
+async def file_assistant_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.pop("file_history", None)
+    context.user_data.pop("file_pending_upload", None)
+    await update.message.reply_text("Fayl rejimidan chiqdingiz. /start bilan qayta boshlashingiz mumkin.")
+    return ConversationHandler.END
+
+
+async def file_assistant_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Fayl-yordamchi rejimida kelgan xabarni (fayl va/yoki matn) qayta ishlaydi."""
+    user = update.effective_user
+    message = update.message
+
+    if not await _check_limit(update, context):
+        return FILE_ASSISTANT
+
+    uploaded_note = ""
+
+    # Agar xabarda fayl (document) bo'lsa — yuklab olib, foydalanuvchi papkasiga saqlaymiz.
+    if message.document:
+        await context.bot.send_chat_action(chat_id=message.chat_id, action=ChatAction.UPLOAD_DOCUMENT)
+        tg_file = await message.document.get_file()
+        tmp_path = os.path.join("generated_files", f"_tmp_{user.id}_{message.document.file_unique_id}_{message.document.file_name}")
+        os.makedirs("generated_files", exist_ok=True)
+        await tg_file.download_to_drive(tmp_path)
+        saved_path = file_assistant.save_uploaded_file(user.id, tmp_path, message.document.file_name)
+        uploaded_note = f"[Foydalanuvchi '{message.document.file_name}' nomli faylni yubordi]\n"
+
+    user_text = (message.caption or message.text or "").strip()
+    if not user_text and message.document:
+        user_text = "Bu faylni tahlil qiling va tarkibi haqida qisqacha ayting."
+    elif not user_text:
+        await message.reply_text("Iltimos, nima qilish kerakligini matn bilan yozing (yoki fayl yuboring).")
+        return FILE_ASSISTANT
+
+    history = context.user_data.get("file_history", [])
+
+    await context.bot.send_chat_action(chat_id=message.chat_id, action=ChatAction.TYPING)
+    try:
+        reply_text, touched_files = file_assistant.run_file_assistant(
+            user_id=user.id, history=history, user_message=uploaded_note + user_text,
+        )
+    except file_assistant.FileAssistantError as e:
+        await message.reply_text(f"❌ Xatolik: {e}")
+        return FILE_ASSISTANT
+
+    history.append({"role": "user", "content": uploaded_note + user_text})
+    history.append({"role": "assistant", "content": reply_text})
+    context.user_data["file_history"] = history[-file_assistant.MAX_HISTORY_MESSAGES:]
+
+    await message.reply_text(reply_text)
+
+    for path in touched_files:
+        if os.path.exists(path):
+            await context.bot.send_chat_action(chat_id=message.chat_id, action=ChatAction.UPLOAD_DOCUMENT)
+            with open(path, "rb") as f:
+                await message.reply_document(document=f, filename=os.path.basename(path))
+
+    return FILE_ASSISTANT
 
 
 # --------------------------------------------------------------------------
@@ -648,8 +724,11 @@ def main() -> None:
             PRESO_SLIDES: [CallbackQueryHandler(preso_slides_received, pattern="^n_")],
             DIAGRAM_TYPE: [CallbackQueryHandler(diagram_type_chosen, pattern="^dtype_")],
             DIAGRAM_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, diagram_desc_received)],
+            FILE_ASSISTANT: [
+                MessageHandler((filters.Document.ALL | filters.TEXT) & ~filters.COMMAND, file_assistant_message),
+            ],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[CommandHandler("cancel", cancel), CommandHandler("done", file_assistant_done)],
     )
 
     admin_conv_handler = ConversationHandler(

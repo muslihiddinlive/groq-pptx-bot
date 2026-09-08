@@ -127,6 +127,12 @@ Bitta kod — ikkala joyda ham ishlaydi.
   jarayon/tuzilma diagrammalari aralashtirib qo'shiladi.
 - 📈 **Faqat diagramma yaratish** — diagramma turini tanlang (yoki AI o'zi
   tanlasin), mazmunini tavsiflab bering — bitta slaydli `.pptx` tayyor bo'ladi.
+- 🗂 **Fayl bilan ishlash (AI)** — Word/Excel/PowerPoint/PDF fayl yuboring
+  (yoki yubormasdan matn bilan so'rang), AI kerakli amalni ([ms-file-toolkit](https://pypi.org/project/ms-file-toolkit/)
+  orqali 36 xil funksiya — o'qish, yaratish, tahrirlash, diagramma qo'shish va h.k.)
+  bajaradi va natija faylini qaytaradi. Har bir foydalanuvchi fayllari alohida,
+  bir-biriga aralashmaydigan papkada saqlanadi (xavfsizlik uchun ikki qatlamli
+  himoya bilan).
 - Qo'llab-quvvatlanadigan diagramma turlari:
   - 🥧 Pie chart (doiraviy)
   - 📊 Bar chart (ustunli)
@@ -171,6 +177,7 @@ groq_pptx_bot/
 ├── pptx_builder.py     # Groq JSON'ini .pptx faylga aylantirish (yuqori daraja)
 ├── diagrams.py          # python-pptx bilan slayd/grafik/diagramma chizish (past daraja)
 ├── slide_renderer.py    # .pptx slaydlarini PNG rasmga aylantirish (LibreOffice + PyMuPDF)
+├── file_assistant.py     # "Fayl bilan ishlash (AI)" rejimi — ms-file-toolkit + Groq tool-calling
 ├── access_control.py    # Whitelist + kunlik limit (SQLite)
 ├── config.py            # .env dan sozlamalarni o'qish
 ├── requirements.txt
@@ -179,6 +186,7 @@ groq_pptx_bot/
 ├── render.yaml           # Render Blueprint (bir-klik deploy sozlamasi)
 ├── .env.example
 └── generated_files/     # Yaratilgan .pptx fayllar shu yerga saqlanadi (avtomatik)
+    └── file_assistant/<user_id>/   # Har bir foydalanuvchining o'z fayllari
 ```
 
 ## Qanday ishlaydi (arxitektura)
