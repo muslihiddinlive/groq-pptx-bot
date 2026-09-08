@@ -10,6 +10,7 @@ Ishga tushirish:
     python bot.py
 (oldin .env faylini to'ldiring — .env.example ga qarang)
 """
+import asyncio
 import logging
 import os
 
@@ -145,7 +146,10 @@ async def preview_slides_callback(update: Update, context: ContextTypes.DEFAULT_
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_PHOTO)
 
     try:
-        image_paths = slide_renderer.render_slides_to_images(filepath)
+        # subprocess.run (LibreOffice) va PDF->rasm konvertatsiyasi to'liq
+        # bloklovchi amal — asyncio.to_thread orqali alohida oqimga chiqarilmasa,
+        # shu vaqt ichida bot BOSHQA HECH KIMGA javob bera olmaydi ("qotib qoladi").
+        image_paths = await asyncio.to_thread(slide_renderer.render_slides_to_images, filepath)
     except slide_renderer.RenderError as e:
         await context.bot.send_message(update.effective_chat.id, f"❌ {e}")
         return
@@ -399,7 +403,10 @@ async def file_assistant_message(update: Update, context: ContextTypes.DEFAULT_T
 
     await context.bot.send_chat_action(chat_id=message.chat_id, action=ChatAction.TYPING)
     try:
-        reply_text, touched_files = file_assistant.run_file_assistant(
+        # run_file_assistant() ichida Groq'ga sinxron so'rov ketadi — bloklamaslik uchun
+        # alohida oqimga chiqaramiz.
+        reply_text, touched_files = await asyncio.to_thread(
+            file_assistant.run_file_assistant,
             user_id=user.id, history=history, user_message=uploaded_note + user_text,
         )
     except file_assistant.FileAssistantError as e:
@@ -459,8 +466,9 @@ async def preso_slides_received(update: Update, context: ContextTypes.DEFAULT_TY
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
 
     try:
-        data = groq_client.generate_presentation(topic, num_slides)
-        filepath = pptx_builder.build_presentation_file(data)
+        # Groq (sinxron) + pptx qurish — asyncio.to_thread orqali bloklamasdan.
+        data = await asyncio.to_thread(groq_client.generate_presentation, topic, num_slides)
+        filepath = await asyncio.to_thread(pptx_builder.build_presentation_file, data)
 
         with open(filepath, "rb") as f:
             await context.bot.send_document(
@@ -520,8 +528,9 @@ async def diagram_desc_received(update: Update, context: ContextTypes.DEFAULT_TY
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
 
     try:
-        data = groq_client.generate_diagram_data(description, hint)
-        filepath = pptx_builder.build_diagram_file(data)
+        # Groq (sinxron) + pptx qurish — asyncio.to_thread orqali bloklamasdan.
+        data = await asyncio.to_thread(groq_client.generate_diagram_data, description, hint)
+        filepath = await asyncio.to_thread(pptx_builder.build_diagram_file, data)
 
         with open(filepath, "rb") as f:
             await context.bot.send_document(
