@@ -17,7 +17,7 @@ import os
 from groq import Groq
 
 from ms_toolkit import TOOLS, dispatch
-from config import GROQ_API_KEYS, GROQ_MODEL
+from config import GROQ_API_KEYS, GROQ_MODEL_CHAIN
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +93,34 @@ def save_uploaded_file(user_id: int, local_tmp_path: str, original_filename: str
     return dest
 
 
+def _is_model_not_found(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "model_not_found" in msg or "does not exist" in msg
+
+
+def _create_completion(client: Groq, messages: list[dict]):
+    """GROQ_MODEL_CHAIN bo'yicha (asosiy model + zaxiralar) urinib ko'radi —
+    agar model mavjud bo'lmasa/ruxsat bo'lmasa, darhol keyingi modelga o'tadi."""
+    last_error = None
+    for model in GROQ_MODEL_CHAIN:
+        try:
+            return client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=_GROQ_TOOLS,
+                tool_choice="auto",
+                temperature=0.3,
+                max_tokens=2000,
+            )
+        except Exception as e:  # noqa: BLE001
+            last_error = e
+            if _is_model_not_found(e):
+                logger.warning("file_assistant: model %s mavjud emas, zaxiraga o'tildi (%s)", model, e)
+                continue
+            raise FileAssistantError(f"Groq bilan bog'lanishda xatolik: {e}") from e
+    raise FileAssistantError(f"Hech qanday model ishlamadi ({', '.join(GROQ_MODEL_CHAIN)}): {last_error}")
+
+
 def run_file_assistant(user_id: int, history: list[dict], user_message: str) -> tuple[str, list[str]]:
     """
     Bitta foydalanuvchi xabarini AI'ga yuboradi, kerakli tool'larni ishga
@@ -119,14 +147,9 @@ def run_file_assistant(user_id: int, history: list[dict], user_message: str) -> 
 
     for _ in range(MAX_TOOL_ITERATIONS):
         try:
-            completion = client.chat.completions.create(
-                model=GROQ_MODEL,
-                messages=messages,
-                tools=_GROQ_TOOLS,
-                tool_choice="auto",
-                temperature=0.3,
-                max_tokens=2000,
-            )
+            completion = _create_completion(client, messages)
+        except FileAssistantError:
+            raise
         except Exception as e:  # noqa: BLE001 - Groq/tarmoq xatolari
             raise FileAssistantError(f"Groq bilan bog'lanishda xatolik: {e}") from e
 

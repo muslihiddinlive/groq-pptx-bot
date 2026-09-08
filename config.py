@@ -25,6 +25,23 @@ GROQ_API_KEYS = [k.strip() for k in _raw_keys.split(",") if k.strip()]
 # To'liq ro'yxat: https://console.groq.com/docs/models
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+# --------------------------------------------------------------------------
+# Zaxira (fallback) modellar — agar asosiy GROQ_MODEL vaqtincha mavjud
+# bo'lmasa/xatolik bersa (masalan "model_not_found"), bot avtomatik ravishda
+# shu ro'yxatdagi keyingi modelga o'tadi. Barchasi tool-calling (function
+# calling)ni ham qo'llab-quvvatlaydi, shuning uchun fayl-yordamchi rejimida
+# ham xavfsiz ishlatilishi mumkin.
+# .env da GROQ_FALLBACK_MODELS=model1,model2 bilan o'zgartirish mumkin.
+# --------------------------------------------------------------------------
+_raw_fallbacks = os.getenv("GROQ_FALLBACK_MODELS", "").strip()
+if _raw_fallbacks:
+    GROQ_FALLBACK_MODELS = [m.strip() for m in _raw_fallbacks.split(",") if m.strip()]
+else:
+    GROQ_FALLBACK_MODELS = ["llama-3.1-8b-instant", "openai/gpt-oss-120b"]
+
+# Asosiy model + zaxiralar — takrorlanishlarsiz, tartib saqlangan holda.
+GROQ_MODEL_CHAIN = [GROQ_MODEL] + [m for m in GROQ_FALLBACK_MODELS if m != GROQ_MODEL]
+
 # Har bir generatsiyada nechta so'rov (retry/kalitlar bo'yicha) qilishga ruxsat berilsin.
 # Agar bir nechta kalit bo'lsa, avtomatik ravishda kamida shuncha marta (yoki kalitlar
 # sonicha, qaysi biri katta bo'lsa) urinib ko'riladi.

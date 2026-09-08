@@ -15,6 +15,7 @@ import os
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, InputMediaPhoto
 from telegram.constants import ChatAction
+from telegram.error import BadRequest
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ConversationHandler, ContextTypes, filters, ApplicationHandlerStop,
@@ -34,6 +35,20 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+
+
+async def _safe_answer(query, text: str = None) -> None:
+    """query.answer()ni xavfsiz chaqiradi — agar callback query eskirib
+    qolgan bo'lsa (masalan bot qayta ishga tushgandan keyin, yoki foydalanuvchi
+    juda eski xabardagi tugmani bossa), Telegram 'Query is too old...' xatosini
+    qaytaradi. Bu holatda botni yiqitmasdan, shunchaki e'tiborsiz qoldiramiz."""
+    try:
+        await query.answer(text=text) if text else await query.answer()
+    except BadRequest as e:
+        if "query is too old" in str(e).lower() or "query id is invalid" in str(e).lower():
+            logger.info("Eskirgan callback query e'tiborsiz qoldirildi: %s", e)
+        else:
+            raise
 
 # --------------------------------------------------------------------------
 # Conversation holatlari
@@ -188,7 +203,7 @@ async def _check_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bo
 
 async def contact_admin_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
 
     if not ADMIN_USER_IDS:
         await query.edit_message_text("⚠️ Hozircha admin sozlanmagan. Keyinroq urinib ko'ring.")
@@ -310,7 +325,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def mode_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
 
     if query.data == "mode_preso":
         await query.edit_message_text(
@@ -430,7 +445,7 @@ async def preso_topic_received(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def preso_slides_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     num_slides = int(query.data.split("_")[1])
     topic = context.user_data.get("topic", "Noma'lum mavzu")
 
@@ -478,7 +493,7 @@ async def preso_slides_received(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def diagram_type_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     dtype = query.data.replace("dtype_", "")
     context.user_data["diagram_hint"] = "" if dtype == "auto" else dtype
 
@@ -614,7 +629,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 async def admin_menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     action = query.data
 
     if action == "admin_add":

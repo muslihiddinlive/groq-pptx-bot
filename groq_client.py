@@ -13,7 +13,7 @@ import threading
 
 from groq import Groq
 
-from config import GROQ_API_KEYS, GROQ_MODEL, GROQ_MAX_RETRIES
+from config import GROQ_API_KEYS, GROQ_MODEL_CHAIN, GROQ_MAX_RETRIES
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +60,24 @@ def _mask(key: str) -> str:
     return f"{key[:6]}...{key[-4:]}" if len(key) > 12 else "***"
 
 
+def _is_model_not_found(exc: Exception) -> bool:
+    """Groq 'model_not_found' (404 — model mavjud emas yoki ruxsat yo'q) xatosini aniqlaydi."""
+    msg = str(exc).lower()
+    return "model_not_found" in msg or "does not exist" in msg
+
+
 def _chat_json(system_prompt: str, user_prompt: str, temperature: float = 0.6, max_tokens: int = 4000) -> dict:
     """
     Groq'ga so'rov yuboradi va JSON obyekt qaytarishini kutadi.
-    Bir nechta API kalit bo'lsa, ular orasida navbat bilan (round-robin) va
-    xatolik/limit holatida keyingi kalitga o'tib sinab ko'riladi.
+
+    Ikki bosqichli qayta urinish:
+    1) Har bir model (GROQ_MODEL_CHAIN — asosiy + zaxiralar) uchun,
+    2) Har bir Groq API kaliti (round-robin) uchun.
+
+    Agar model "model_not_found" xatosi bersa, DARHOL keyingi modelga o'tiladi
+    (chunki bu holatda boshqa kalitni sinash foyda bermaydi — muammo model
+    darajasida). Boshqa xatolar (limit/tarmoq) uchun avvalgidek keyingi kalit
+    sinaladi.
     """
     if not _key_pool.has_keys():
         raise GroqGenerationError(
@@ -72,39 +85,44 @@ def _chat_json(system_prompt: str, user_prompt: str, temperature: float = 0.6, m
             "GROQ_API_KEYS=kalit1,kalit2,... qo'shing."
         )
 
-    n_attempts = max(len(_key_pool), GROQ_MAX_RETRIES)
-    keys_to_try = _key_pool.attempt_sequence(n_attempts)
-
     last_error = None
-    for attempt, key in enumerate(keys_to_try, start=1):
-        client = Groq(api_key=key)
-        try:
-            completion = client.chat.completions.create(
-                model=GROQ_MODEL,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=temperature,
-                response_format={"type": "json_object"},
-                max_tokens=max_tokens,
-            )
-            raw = completion.choices[0].message.content
-            return json.loads(raw)
-        except json.JSONDecodeError as e:
-            last_error = e
-            logger.warning("Urinish %s/%s (kalit %s): Groq JSON qaytarmadi (%s)",
-                            attempt, len(keys_to_try), _mask(key), e)
-        except Exception as e:  # noqa: BLE001 - Groq/tarmoq xatolarini ham ushlaymiz
-            last_error = e
-            msg = str(e).lower()
-            reason = "limit/kvota tugagan" if any(w in msg for w in ("rate", "429", "quota")) else "xatolik"
-            logger.warning("Urinish %s/%s (kalit %s): %s (%s)",
-                            attempt, len(keys_to_try), _mask(key), reason, e)
+
+    for model in GROQ_MODEL_CHAIN:
+        n_attempts = max(len(_key_pool), GROQ_MAX_RETRIES)
+        keys_to_try = _key_pool.attempt_sequence(n_attempts)
+
+        for attempt, key in enumerate(keys_to_try, start=1):
+            client = Groq(api_key=key)
+            try:
+                completion = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=temperature,
+                    response_format={"type": "json_object"},
+                    max_tokens=max_tokens,
+                )
+                raw = completion.choices[0].message.content
+                return json.loads(raw)
+            except json.JSONDecodeError as e:
+                last_error = e
+                logger.warning("Model %s, urinish %s/%s (kalit %s): Groq JSON qaytarmadi (%s)",
+                                model, attempt, len(keys_to_try), _mask(key), e)
+            except Exception as e:  # noqa: BLE001 - Groq/tarmoq xatolarini ham ushlaymiz
+                last_error = e
+                if _is_model_not_found(e):
+                    logger.warning("Model %s mavjud emas/ruxsat yo'q — zaxira modelga o'tiladi (%s)", model, e)
+                    break  # shu model bilan boshqa kalit sinamaymiz, keyingi modelga o'tamiz
+                msg = str(e).lower()
+                reason = "limit/kvota tugagan" if any(w in msg for w in ("rate", "429", "quota")) else "xatolik"
+                logger.warning("Model %s, urinish %s/%s (kalit %s): %s (%s)",
+                                model, attempt, len(keys_to_try), _mask(key), reason, e)
 
     raise GroqGenerationError(
-        f"Groq'dan {len(keys_to_try)} urinishdan (kalitlar bo'yicha) keyin ham "
-        f"to'g'ri javob olinmadi: {last_error}"
+        f"Groq'dan barcha modellar ({', '.join(GROQ_MODEL_CHAIN)}) va kalitlar bo'yicha "
+        f"urinishdan keyin ham to'g'ri javob olinmadi: {last_error}"
     )
 
 

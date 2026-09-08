@@ -208,6 +208,24 @@ groq_pptx_bot/
 https://console.groq.com/docs/models — masalan `llama-3.1-8b-instant`
 (tezroq, arzonroq) yoki `openai/gpt-oss-120b`.
 
+### Avtomatik zaxira (fallback) model
+
+Agar asosiy model (`GROQ_MODEL`) Groq tomonidan vaqtincha mavjud
+bo'lmay qolsa (masalan `model_not_found` xatosi — hisobingiz uchun
+vaqtincha cheklov yoki Groq tomonidagi uzilish bo'lishi mumkin), bot
+buni avtomatik aniqlab, DARHOL keyingi modelga o'tadi (boshqa
+kalitlarni behuda sinamaydi, chunki bu model darajasidagi muammo).
+
+Standart zaxira zanjiri: `llama-3.3-70b-versatile` → `llama-3.1-8b-instant`
+→ `openai/gpt-oss-120b`. O'zgartirish uchun `.env` ga qo'shing:
+
+```
+GROQ_FALLBACK_MODELS=llama-3.1-8b-instant,openai/gpt-oss-120b
+```
+
+Bu fallback ham prezentatsiya/diagramma generatsiyasida, ham
+"Fayl bilan ishlash (AI)" rejimida ishlaydi.
+
 ## Kengaytirish g'oyalari
 
 - Rate-limiting / foydalanuvchi bo'yicha kunlik limit qo'shish.
