@@ -48,7 +48,40 @@ def init_db() -> None:
                 PRIMARY KEY (user_id, day)
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
         conn.commit()
+
+
+def get_setting(key: str, default: str = None) -> str:
+    with _lock, _connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with _lock, _connect() as conn:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        conn.commit()
+
+
+def get_active_model() -> str:
+    """Admin panel orqali o'rnatilgan joriy Groq modelini qaytaradi;
+    agar hech qachon o'zgartirilmagan bo'lsa, config.py'dagi standart qiymat."""
+    from config import GROQ_MODEL
+    return get_setting("groq_model", GROQ_MODEL)
+
+
+def set_active_model(model: str) -> None:
+    set_setting("groq_model", model.strip())
 
 
 def is_admin(user_id: int) -> bool:

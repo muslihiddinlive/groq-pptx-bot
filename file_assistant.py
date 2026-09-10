@@ -17,7 +17,7 @@ import os
 from groq import Groq
 
 from ms_toolkit import TOOLS, dispatch
-from config import GROQ_API_KEYS, GROQ_MODEL_CHAIN
+from config import GROQ_API_KEYS, GROQ_FALLBACK_MODELS
 
 logger = logging.getLogger(__name__)
 
@@ -98,11 +98,21 @@ def _is_model_not_found(exc: Exception) -> bool:
     return "model_not_found" in msg or "does not exist" in msg
 
 
+def _model_chain() -> list[str]:
+    """Har chaqiruvda yangidan hisoblanadi — birinchi o'rinda admin panel
+    orqali o'rnatilgan joriy model, keyin config.py'dagi zaxira modellar."""
+    import access_control as ac  # doiraviy import'dan qochish uchun shu yerda
+    active = ac.get_active_model()
+    return [active] + [m for m in GROQ_FALLBACK_MODELS if m != active]
+
+
 def _create_completion(client: Groq, messages: list[dict]):
-    """GROQ_MODEL_CHAIN bo'yicha (asosiy model + zaxiralar) urinib ko'radi —
-    agar model mavjud bo'lmasa/ruxsat bo'lmasa, darhol keyingi modelga o'tadi."""
+    """Dinamik model zanjiri (admin belgilagan asosiy + zaxiralar) bo'yicha
+    urinib ko'radi — agar model mavjud bo'lmasa/ruxsat bo'lmasa, darhol
+    keyingi modelga o'tadi."""
     last_error = None
-    for model in GROQ_MODEL_CHAIN:
+    model_chain = _model_chain()
+    for model in model_chain:
         try:
             return client.chat.completions.create(
                 model=model,
@@ -118,7 +128,7 @@ def _create_completion(client: Groq, messages: list[dict]):
                 logger.warning("file_assistant: model %s mavjud emas, zaxiraga o'tildi (%s)", model, e)
                 continue
             raise FileAssistantError(f"Groq bilan bog'lanishda xatolik: {e}") from e
-    raise FileAssistantError(f"Hech qanday model ishlamadi ({', '.join(GROQ_MODEL_CHAIN)}): {last_error}")
+    raise FileAssistantError(f"Hech qanday model ishlamadi ({', '.join(model_chain)}): {last_error}")
 
 
 def run_file_assistant(user_id: int, history: list[dict], user_message: str) -> tuple[str, list[str]]:

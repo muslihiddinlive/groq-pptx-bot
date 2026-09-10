@@ -204,27 +204,45 @@ groq_pptx_bot/
 
 ## Modelni almashtirish
 
-`.env` faylida `GROQ_MODEL` ni o'zgartiring. Groq'da mavjud modellar:
-https://console.groq.com/docs/models — masalan `llama-3.1-8b-instant`
-(tezroq, arzonroq) yoki `openai/gpt-oss-120b`.
+### 🔧 Eng tez yo'l: /admin panel (botni qayta ishga tushirmasdan)
+
+Admin `/admin` → "🔧 Groq modelini o'zgartirish" tugmasi orqali joriy
+modelni istalgan vaqtda o'zgartira oladi — o'zgarish **darhol** kuchga
+kiradi, Render'ga kirish yoki qayta deploy qilish shart emas.
+
+> ⚠️ Bu Render'ning bepul rejasidagi (persistent disk'siz) SQLite bazasida
+> saqlanadi — servis qayta ishga tushganda (deploy/restart/uyqudan
+> uyg'onish) standart holatga qaytishi mumkin. Shunday bo'lsa, shu
+> menyudan yana bir marta o'rnatib qo'ying.
+
+### `.env` orqali (standart qiymat)
+
+`GROQ_MODEL` ni o'zgartiring — bu faqat admin panel orqali hali hech
+qachon o'zgartirilmagan holatdagi standart qiymat. Groq'da mavjud
+modellar: https://console.groq.com/docs/models
+
+> **Diqqat:** Groq vaqti-vaqti bilan ba'zi modellarni eskirtirib, butunlay
+> o'chirib tashlaydi (masalan `llama-3.3-70b-versatile` va
+> `llama-3.1-8b-instant` 2026-yil avgustidan beri o'chirilgan). Shu sababli
+> standart model `openai/gpt-oss-120b` qilib qo'yilgan.
 
 ### Avtomatik zaxira (fallback) model
 
-Agar asosiy model (`GROQ_MODEL`) Groq tomonidan vaqtincha mavjud
-bo'lmay qolsa (masalan `model_not_found` xatosi — hisobingiz uchun
-vaqtincha cheklov yoki Groq tomonidagi uzilish bo'lishi mumkin), bot
-buni avtomatik aniqlab, DARHOL keyingi modelga o'tadi (boshqa
-kalitlarni behuda sinamaydi, chunki bu model darajasidagi muammo).
+Agar joriy model Groq tomonidan mavjud bo'lmay qolsa (`model_not_found`
+xatosi), bot buni avtomatik aniqlab, DARHOL keyingi modelga o'tadi
+(boshqa kalitlarni behuda sinamaydi, chunki bu model darajasidagi
+muammo).
 
-Standart zaxira zanjiri: `llama-3.3-70b-versatile` → `llama-3.1-8b-instant`
-→ `openai/gpt-oss-120b`. O'zgartirish uchun `.env` ga qo'shing:
+Standart zaxira zanjiri: `openai/gpt-oss-120b` → `openai/gpt-oss-20b` →
+`moonshotai/kimi-k2-instruct`. O'zgartirish uchun `.env` ga qo'shing:
 
 ```
-GROQ_FALLBACK_MODELS=llama-3.1-8b-instant,openai/gpt-oss-120b
+GROQ_FALLBACK_MODELS=openai/gpt-oss-20b,moonshotai/kimi-k2-instruct
 ```
 
-Bu fallback ham prezentatsiya/diagramma generatsiyasida, ham
-"Fayl bilan ishlash (AI)" rejimida ishlaydi.
+Bu fallback ham, admin panel orqali o'rnatilgan joriy model ham,
+prezentatsiya/diagramma generatsiyasida VA "Fayl bilan ishlash (AI)"
+rejimida bir xilda ishlaydi.
 
 ## Kengaytirish g'oyalari
 

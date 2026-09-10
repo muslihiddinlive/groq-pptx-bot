@@ -68,7 +68,8 @@ async def _safe_answer(query, text: str = None) -> None:
     ADMIN_WAIT_ADD,
     ADMIN_WAIT_REMOVE,
     ADMIN_WAIT_SETLIMIT,
-) = range(6, 10)
+    ADMIN_WAIT_MODEL,
+) = range(6, 11)
 
 # (admin_chat_id, admin_message_id) -> original_user_chat_id
 # Admin forward qilingan xabarga "reply" qilsa, javob shu orqali foydalanuvchiga qaytadi.
@@ -606,6 +607,7 @@ def _admin_menu_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("✏️ Limitni o'zgartirish", callback_data="admin_setlimit")],
         [InlineKeyboardButton("➖ Foydalanuvchini o'chirish", callback_data="admin_remove")],
         [InlineKeyboardButton("📋 Ro'yxatni ko'rish", callback_data="admin_list")],
+        [InlineKeyboardButton("🔧 Groq modelini o'zgartirish", callback_data="admin_model")],
     ])
 
 
@@ -675,6 +677,21 @@ async def admin_menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return ADMIN_MENU
 
+    elif action == "admin_model":
+        current = ac.get_active_model()
+        await query.edit_message_text(
+            f"🔧 <b>Groq modelini o'zgartirish</b>\n\n"
+            f"Joriy model: <code>{current}</code>\n\n"
+            f"Yangi model nomini yuboring (masalan <code>openai/gpt-oss-120b</code>).\n"
+            f"To'liq ro'yxat: https://console.groq.com/docs/models\n\n"
+            f"⚠️ Diqqat: bu o'zgarish SQLite bazasida saqlanadi. Render'ning bepul "
+            f"rejasida diskning \"persistent\" emasligi sababli, servis qayta ishga "
+            f"tushganda (deploy/restart) bu qiymat standart holatga qaytishi mumkin — "
+            f"shunday bo'lsa, shu menyudan yana bir marta o'rnatib qo'ying.",
+            parse_mode="HTML",
+        )
+        return ADMIN_WAIT_MODEL
+
     return ADMIN_MENU
 
 
@@ -716,6 +733,25 @@ async def admin_remove_received(update: Update, context: ContextTypes.DEFAULT_TY
     text = (f"✅ Foydalanuvchi <code>{target_id}</code> whitelist'dan o'chirildi." if removed
             else f"⚠️ Foydalanuvchi <code>{target_id}</code> whitelist'da topilmadi.")
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=_admin_menu_keyboard())
+    return ADMIN_MENU
+
+
+async def admin_model_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    new_model = update.message.text.strip()
+    if not new_model or " " in new_model:
+        await update.message.reply_text(
+            "❌ Model nomi bo'sh joysiz, bitta so'z (masalan <code>openai/gpt-oss-120b</code>) bo'lishi kerak. Qayta yuboring.",
+            parse_mode="HTML",
+        )
+        return ADMIN_WAIT_MODEL
+
+    ac.set_active_model(new_model)
+    await update.message.reply_text(
+        f"✅ Joriy Groq modeli <code>{new_model}</code> ga o'zgartirildi.\n\n"
+        f"Bu darhol kuchga kiradi — botni qayta ishga tushirish shart emas.",
+        parse_mode="HTML",
+        reply_markup=_admin_menu_keyboard(),
+    )
     return ADMIN_MENU
 
 
@@ -762,6 +798,7 @@ def main() -> None:
             ADMIN_WAIT_ADD: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_or_setlimit_received)],
             ADMIN_WAIT_SETLIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_or_setlimit_received)],
             ADMIN_WAIT_REMOVE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_remove_received)],
+            ADMIN_WAIT_MODEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_model_received)],
         },
         fallbacks=[CommandHandler("cancel", admin_cancel)],
     )

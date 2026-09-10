@@ -13,7 +13,18 @@ import threading
 
 from groq import Groq
 
-from config import GROQ_API_KEYS, GROQ_MODEL_CHAIN, GROQ_MAX_RETRIES
+from config import GROQ_API_KEYS, GROQ_FALLBACK_MODELS, GROQ_MAX_RETRIES
+
+
+def _model_chain() -> list[str]:
+    """Har chaqiruvda YANGIDAN hisoblanadigan model zanjiri: birinchi o'rinda
+    admin panel orqali o'rnatilgan joriy model (yoki .env/standart, agar admin
+    hali o'zgartirmagan bo'lsa), keyin config.py'dagi zaxira modellar.
+    Har safar yangidan hisoblanishi muhim — shunda admin /admin panelidan
+    modelni o'zgartirganda, botni qayta ishga tushirmasdan ham darhol kuchga kiradi."""
+    import access_control as ac  # doiraviy import'dan qochish uchun shu yerda
+    active = ac.get_active_model()
+    return [active] + [m for m in GROQ_FALLBACK_MODELS if m != active]
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +82,7 @@ def _chat_json(system_prompt: str, user_prompt: str, temperature: float = 0.6, m
     Groq'ga so'rov yuboradi va JSON obyekt qaytarishini kutadi.
 
     Ikki bosqichli qayta urinish:
-    1) Har bir model (GROQ_MODEL_CHAIN — asosiy + zaxiralar) uchun,
+    1) Har bir model (dinamik model zanjiri — admin belgilagan asosiy model + config.py'dagi zaxiralar) uchun,
     2) Har bir Groq API kaliti (round-robin) uchun.
 
     Agar model "model_not_found" xatosi bersa, DARHOL keyingi modelga o'tiladi
@@ -86,8 +97,9 @@ def _chat_json(system_prompt: str, user_prompt: str, temperature: float = 0.6, m
         )
 
     last_error = None
+    model_chain = _model_chain()
 
-    for model in GROQ_MODEL_CHAIN:
+    for model in model_chain:
         n_attempts = max(len(_key_pool), GROQ_MAX_RETRIES)
         keys_to_try = _key_pool.attempt_sequence(n_attempts)
 
@@ -121,7 +133,7 @@ def _chat_json(system_prompt: str, user_prompt: str, temperature: float = 0.6, m
                                 model, attempt, len(keys_to_try), _mask(key), reason, e)
 
     raise GroqGenerationError(
-        f"Groq'dan barcha modellar ({', '.join(GROQ_MODEL_CHAIN)}) va kalitlar bo'yicha "
+        f"Groq'dan barcha modellar ({', '.join(model_chain)}) va kalitlar bo'yicha "
         f"urinishdan keyin ham to'g'ri javob olinmadi: {last_error}"
     )
 

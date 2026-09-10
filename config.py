@@ -21,25 +21,32 @@ if not _raw_keys:
 GROQ_API_KEYS = [k.strip() for k in _raw_keys.split(",") if k.strip()]
 
 # Groq'da mavjud tez va sifatli modellardan biri.
-# Boshqa modellar: "llama-3.1-8b-instant" (tezroq), "openai/gpt-oss-120b" va h.k.
-# To'liq ro'yxat: https://console.groq.com/docs/models
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+# DIQQAT: Groq vaqti-vaqti bilan ba'zi modellarni eskirtirib, o'chirib tashlaydi
+# (masalan llama-3.3-70b-versatile va llama-3.1-8b-instant 2026-yil avgustidan
+# beri o'chirilgan). Joriy ro'yxat: https://console.groq.com/docs/models
+# Bu yerdagi qiymat FAQAT bot birinchi marta ishga tushganda ishlatiladigan
+# standart holat — keyinchalik /admin panel orqali (Render'ga kirmasdan)
+# o'zgartirish mumkin, natija SQLite bazasida saqlanadi.
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 # --------------------------------------------------------------------------
-# Zaxira (fallback) modellar — agar asosiy GROQ_MODEL vaqtincha mavjud
-# bo'lmasa/xatolik bersa (masalan "model_not_found"), bot avtomatik ravishda
-# shu ro'yxatdagi keyingi modelga o'tadi. Barchasi tool-calling (function
-# calling)ni ham qo'llab-quvvatlaydi, shuning uchun fayl-yordamchi rejimida
-# ham xavfsiz ishlatilishi mumkin.
+# Zaxira (fallback) modellar — agar joriy model vaqtincha mavjud bo'lmasa/
+# xatolik bersa (masalan "model_not_found"), bot avtomatik ravishda shu
+# ro'yxatdagi keyingi modelga o'tadi. Barchasi tool-calling (function
+# calling) va JSON-mode'ni qo'llab-quvvatlaydi.
 # .env da GROQ_FALLBACK_MODELS=model1,model2 bilan o'zgartirish mumkin.
 # --------------------------------------------------------------------------
 _raw_fallbacks = os.getenv("GROQ_FALLBACK_MODELS", "").strip()
 if _raw_fallbacks:
     GROQ_FALLBACK_MODELS = [m.strip() for m in _raw_fallbacks.split(",") if m.strip()]
 else:
-    GROQ_FALLBACK_MODELS = ["llama-3.1-8b-instant", "openai/gpt-oss-120b"]
+    GROQ_FALLBACK_MODELS = ["openai/gpt-oss-20b", "moonshotai/kimi-k2-instruct"]
 
 # Asosiy model + zaxiralar — takrorlanishlarsiz, tartib saqlangan holda.
+# ESLATMA: bu STATIK zanjir (.env asosida) — admin panel orqali o'zgartirilgan
+# joriy model buni HISOBGA OLMAYDI. Dinamik (admin-panel bilan birga
+# ishlaydigan) zanjir uchun groq_client.py/file_assistant.py ichidagi
+# _model_chain() funksiyasiga qarang.
 GROQ_MODEL_CHAIN = [GROQ_MODEL] + [m for m in GROQ_FALLBACK_MODELS if m != GROQ_MODEL]
 
 # Har bir generatsiyada nechta so'rov (retry/kalitlar bo'yicha) qilishga ruxsat berilsin.
